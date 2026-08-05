@@ -260,6 +260,22 @@ There is no `CHANGES.md`. `git diff` is the change log; `DECISIONS.md` is why.
 
 ---
 
+## `state/friction.md` — feedback to this skill
+
+Not a governance document, and exempt from the cap of six: it points outward, at
+the skill, not inward at the survey.
+
+**Append two lines whenever the skill snags.** A rule that turned out to be
+wrong, a script that fought back, a place the manual was silent when you needed
+it, a step that cost far more than it should have. Date, what happened, what
+would have helped.
+
+Do it in the moment. Friction is obvious while you are stuck in it and nearly
+invisible a week later, and a session transcript is a poor substitute — by the
+time anyone reads one, the thing that was annoying has been smoothed over and
+forgotten. This file is the first-hand record that improves the skill for the
+next project.
+
 ## Optional: `state/stances.jsonl`
 
 How a citing paper treats a cited one — builds-on, adopts, contrasts, refutes,
