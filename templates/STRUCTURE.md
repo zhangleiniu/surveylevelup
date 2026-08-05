@@ -30,6 +30,7 @@ and how things are named.
 │
 ├── state/                                                       [written by scripts]
 │   ├── progress.json      gate state, signatures, trial papers, counts
+│   ├── friction.md        feedback to the skill, not about this survey  [append-only]
 │   └── stances.jsonl      optional; contested citation pairs only
 │
 ├── drafts/v1/                                                   [writable]

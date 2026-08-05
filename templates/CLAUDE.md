@@ -51,6 +51,11 @@ The skill's own manual is `~/.claude/skills/surveylevelup/SKILL.md`, with
   `CONSTITUTION.md`; dated structural decisions to `DECISIONS.md`; cross-paper
   evidence to `FINDINGS.md`.
 - Review happens by diff. Prefer small, legible commits.
+- **Append to `state/friction.md` whenever the skill gets in the way** — a rule
+  that was wrong, a script that fought back, a place the manual was silent, a
+  step that cost far more than it should have. Two lines, written *in the
+  moment*. This is feedback to the skill, not a note about this survey, and it is
+  the only record that will still exist when someone improves the skill later.
 
 ## Current state — {{DATE}}
 

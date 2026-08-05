@@ -81,6 +81,7 @@ Every script prints JSON.
 │   └── cards/<type>/<bibkey>.md
 ├── state/
 │   ├── progress.json      gate state, signatures, counts
+│   ├── friction.md        where this skill got in the way — append in the moment
 │   └── stances.jsonl      optional; see below
 ├── drafts/v1/
 │   ├── main.tex, sections/, appendices/, figures/

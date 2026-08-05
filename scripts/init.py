@@ -111,6 +111,21 @@ def main():
     else:
         state = "kept (already present)"
 
+    friction = project / "state" / "friction.md"
+    if not friction.exists():
+        friction.write_text(
+            "# Friction\n\n"
+            "Where **surveylevelup** got in the way. Feedback to the skill, not notes\n"
+            "about this survey. Append in the moment — friction is obvious while you\n"
+            "are stuck in it and nearly invisible a week later.\n\n"
+            "Two lines each: what happened, and what would have helped.\n\n"
+            "```\n"
+            "## YYYY-MM-DD — <one line>\n"
+            "What happened. What would have helped.\n"
+            "```\n\n"
+            "---\n\n"
+            "_Nothing yet._\n")
+
     gitignore = project / ".gitignore"
     if not gitignore.exists():
         gitignore.write_text("corpus\ninputs/fulltext/\n*.aux\n*.log\n*.out\n*.bbl\n*.blg\n")
