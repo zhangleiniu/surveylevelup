@@ -1,0 +1,7 @@
+interface:
+  display_name: "Survey Level Up"
+  short_description: "Turn a curated paper corpus into an expert survey"
+  default_prompt: "Use $surveylevelup to set up the survey project and help me derive the organizing axis before designing any extraction schema."
+
+policy:
+  allow_implicit_invocation: true
