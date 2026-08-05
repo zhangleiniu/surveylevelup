@@ -5,7 +5,7 @@
 **Turn a curated paper corpus into an expert survey**, with the evidence chain
 intact and the parts that go wrong made visible.
 
-This is the downstream half of a pair. [`paperlevelup`](../paperlevelup) takes a
+This is the downstream half of a pair. [`paperlevelup`](https://github.com/zhangleiniu/paperlevelup) takes a
 folder of PDFs and produces an organized, identified, growable corpus.
 `surveylevelup` starts there and carries it to a drafted manuscript.
 
