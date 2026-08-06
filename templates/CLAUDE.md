@@ -46,7 +46,12 @@ The skill's own manual is `~/.claude/skills/surveylevelup/SKILL.md`, with
 - **Propose before large changes.** State the plan, get approval, then generate.
 - **Ask rather than guess** on domain calls — axis boundaries, anchor selection,
   whether a paper belongs. Guessing produces the mechanical output this method
-  exists to eliminate.
+  exists to eliminate. Ask in prose, about named papers, one question at a time.
+- **Never offer a menu of candidate axes**, and never ask which axis to use
+  before the corpus has been described back to the expert. The axis is converged
+  on over several rounds: portrait → tensions → one candidate with its evidence →
+  the cut. A multiple-choice question about the organizing variable asks for the
+  one judgment that has to be earned by reading first.
 - **Record corrections in the document that owns them.** Enduring rules to
   `CONSTITUTION.md`; dated structural decisions to `DECISIONS.md`; cross-paper
   evidence to `FINDINGS.md`.
@@ -64,7 +69,8 @@ The skill's own manual is `~/.claude/skills/surveylevelup/SKILL.md`, with
 | Corpus | {{N_PAPERS}} papers · `corpus/TOPIC.md` |
 | Bibliography | not built |
 | Full text | not extracted |
-| Axis | not derived |
+| Corpus portrait | not run, not yet described to the expert |
+| Axis | not derived — see DECISIONS.md for candidates under test |
 | Sections | not defined |
 | Schema | not designed |
 | Extraction gate | **closed** |

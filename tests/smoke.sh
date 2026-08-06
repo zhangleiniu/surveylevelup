@@ -3,8 +3,9 @@
 #
 #   tests/smoke.sh <a paperlevelup topic dir> [workdir]
 #
-# Verifies: init lays out the project; build_bib produces entries; the gate
-# reports closed and refuses to open unsigned; a bad prompt field block is
+# Verifies: init lays out the project; build_bib produces entries; the corpus
+# portrait runs; the gate reports closed and refuses to open unsigned; a bad
+# prompt field block is
 # rejected; a good one parses; card validation catches a bogus enum value and
 # flags cards written outside the trial set while the gate is closed.
 
@@ -29,6 +30,14 @@ ok "init laid out the project"
 python3 "$S/build_bib.py" --project "$WORK" >/dev/null
 grep -q "^@" "$WORK/inputs/references.bib" || fail "no bib entries"
 ok "build_bib produced entries"
+
+PORTRAIT="$(python3 "$S/corpus_portrait.py" --project "$WORK" --top 5)"
+echo "$PORTRAIT" | grep -q '"by_category"' || fail "portrait reported no categories"
+echo "$PORTRAIT" | grep -q '"papers_that_resist_their_category"' \
+  || fail "portrait skipped the misfit diagnostic"
+echo "$PORTRAIT" | grep -q 'menu of candidate axes' \
+  || fail "portrait dropped the no-menu instruction"
+ok "corpus portrait describes the corpus"
 
 python3 "$S/gate.py" --project "$WORK" --status | grep -q '"gate": "closed"' \
   || fail "gate should start closed"

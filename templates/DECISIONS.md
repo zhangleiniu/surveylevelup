@@ -20,15 +20,19 @@ Format:
 
 ---
 
-## Axes considered and rejected
+## Candidate axes
 
-Two lines each. Read this before proposing a new axis, and make the new one
-differ in kind rather than in wording. See
-`~/.claude/skills/surveylevelup/references/thesis-derivation.md`.
+One row per candidate, added when it is first put to the expert — including the
+one currently under test. **Name the papers you expect to break it before you
+test them**; choosing the test cases after seeing the result proves nothing.
 
-| Candidate axis | Why it failed |
-|---|---|
-| _none yet_ | |
+Read this table before proposing a new candidate, and make the new one differ in
+kind rather than in wording. Candidates are brought one at a time, never as a
+menu. See `~/.claude/skills/surveylevelup/references/thesis-derivation.md`.
+
+| Date | Candidate axis | Papers named to break it | Status | Outcome |
+|---|---|---|---|---|
+| | _none yet_ | | under test / rejected / adopted | |
 
 ---
 

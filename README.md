@@ -51,15 +51,23 @@ the whole corpus.** Everything before it — reading full text, sketching an axi
 naming sections, trying a schema on five papers — is cheap and freely revisable.
 
 ```
-    ┌──────────────────────────────────────────────┐
-    │  read → sharpen the axis → name the sections │
-    │  → sketch the schema → try it on a handful   │
-    │  → find it wrong → back                      │
-    └───────────────────┬──────────────────────────┘
-                        │   the extraction gate
-                        ▼
-              extract over the corpus  ⇄  draft
+    describe the corpus  →  ┌───────────────────────────────────────────┐
+    (before any axis is     │  read → sharpen the axis → name the       │
+     on the table)          │  sections → sketch the schema → try it    │
+                            │  on a handful → find it wrong → back      │
+                            └──────────────────┬────────────────────────┘
+                                               │   the extraction gate
+                                               ▼
+                                     extract over the corpus  ⇄  draft
 ```
+
+**The first thing produced is a portrait of the corpus, not a proposal.** What is
+in it, what is growing, where the filed categories blur, which papers refuse to
+sit still — written back to the expert in prose, ending in questions rather than
+options. The axis is then converged on over several rounds: tensions, then one
+candidate at a time with the papers named in advance that should break it. Asking
+an expert to pick an axis from a menu on day one asks for the one judgment the
+whole method exists to earn.
 
 The gate opens on mechanical checks **and** an expert signature. Crossing is
 reversible: cards often reveal the axis was wrong. What the gate prevents is
@@ -76,6 +84,7 @@ python3 ~/.claude/skills/surveylevelup/scripts/init.py \
 
 cd ~/work/<topic>-survey
 python3 ~/.claude/skills/surveylevelup/scripts/build_bib.py       # fix gaps upstream
+python3 ~/.claude/skills/surveylevelup/scripts/corpus_portrait.py # what is in here?
 python3 ~/.claude/skills/surveylevelup/scripts/extract_fulltext.py
 python3 ~/.claude/skills/surveylevelup/scripts/gate.py --status
 ```
@@ -108,6 +117,7 @@ root with a warning label, because that is the same fact living in two places.
 | Script | Does |
 |---|---|
 | `init.py` | Lay out the project, link the corpus read-only, instantiate the six documents |
+| `corpus_portrait.py` | Describe the corpus as filed — trajectories per category, categories that read alike, shared vocabulary, papers that resist their folder, groups that straddle boundaries. Proposes nothing |
 | `build_bib.py` | Corpus sidecar → `references.bib`, plus a gap report that only flags what actually blocks |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md` via PyMuPDF. Ungated |
 | `gate.py` | Report gate readiness; `--open --signed-by` records the crossing |
@@ -130,6 +140,8 @@ that what got written matches the declared contract.
 - **Never edit a card.** Flag it; fix the producer and re-run.
 - **Name things in words.** No codenames, no letter-number labels — not in
   filenames, and above all not when talking to the expert.
+- **No menu of candidate axes.** Ask about named papers, in prose, one candidate
+  at a time. Rejected candidates and the one under test live in `DECISIONS.md`.
 
 ## Tests
 

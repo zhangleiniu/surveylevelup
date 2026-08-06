@@ -139,9 +139,12 @@ def main():
         "progress": state,
         "gate": "closed",
         "next": [
-            "read CONSTITUTION.md and fill in scope and the inclusion rule",
             "python build_bib.py   # then fix any blocking gaps upstream in the corpus",
-            "read the corpus, derive the axis — see references/thesis-derivation.md",
+            "python corpus_portrait.py   # describe the corpus before proposing anything",
+            "read the corpus, then write the expert a portrait in prose and ask what "
+            "they recognize — do NOT ask them to pick an axis; the axis is converged "
+            "on over several rounds. See SKILL.md and references/thesis-derivation.md",
+            "fill in scope and the inclusion rule in CONSTITUTION.md as they settle",
         ],
     })
 

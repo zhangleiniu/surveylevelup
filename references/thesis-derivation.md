@@ -11,6 +11,28 @@ the schema determines what you can write at all.
 
 ---
 
+## It is converged on, never chosen
+
+An axis is not selected from options at the start; it is the last thing to
+stabilize. The order that works:
+
+1. **Describe the corpus.** `corpus_portrait.py` plus real reading, written back
+   to the expert as prose. No proposal in it at all. See SKILL.md.
+2. **Name the tensions.** Two to four specific disagreements the corpus contains,
+   each with papers on both sides. Ask which are real and which are two
+   communities naming one thing twice.
+3. **Bring one candidate**, with the awkward papers it places and the papers you
+   expect to break it, named in advance.
+4. **Test it, then re-cut or keep.** Rejected candidates go to `DECISIONS.md`
+   with the reason.
+
+Each round asks the expert for a *reaction* to evidence, never for a decision
+between labels. **Never put candidate axes to the expert as a menu**, least of
+all early: it asks them to do the comparison without the evidence you are
+holding, at the point where the honest answer is "none of these — that is the
+question I wanted answered". Several rounds is the normal cost, not a sign that
+the process is stalling.
+
 ## An axis is not a topic
 
 | Not an axis | An axis |
@@ -63,15 +85,20 @@ stage. Both produce a structure that is defensible, complete, and says nothing.
 ## Diagnostics worth running
 
 These are cheap and they surface structure you will not see by reading in order.
+`corpus_portrait.py` computes the first two and part of the third; run it before
+the first conversation and again whenever the corpus grows.
 
-**Publication year by category.** Compute the year distribution per category and
-the share published after some cut. It tells you which parts of the field are
+**Publication year by category.** The year distribution per category and the
+share published after some cut. It tells you which parts of the field are
 accelerating, which have gone quiet, and where the existing surveys stopped. A
 category with a sharp peak and a long tail of nothing is either finished or
 abandoned — and which of those it is, is a claim worth making.
 
-**Papers that resist classification.** Keep a list of the papers that were
-genuinely hard to place, and of any you had to cross-list. Under the right axis,
+**Papers that resist classification.** The portrait names the ones whose wording
+sits closer to a category other than their own, and the categories that read
+alike; add to that list the papers *you* found hard to place while reading, which
+is usually the more valuable half — a paper resists a taxonomy on substance its
+abstract never states. Under the right axis,
 most of them stop being hard. If a candidate axis leaves the same papers awkward,
 it is not the axis. If it makes a previously coherent group split cleanly along a
 line nobody had drawn, that is evidence it is.
@@ -96,6 +123,12 @@ your metadata source indexes some venues and not others, whole communities are
 structurally invisible), and collection bias. Papers that are central to the topic
 routinely score zero. Use citation structure to find *chains and reactions*, never
 to decide whether a paper belongs.
+
+**Vocabulary overlap is not conceptual overlap.** Two categories that share terms
+may be one field naming a thing twice, or two fields using one word for different
+things. The portrait cannot tell which, and neither can you without reading the
+papers it named. Take it to the expert as a question about specific papers, never
+as a finding.
 
 **Reference coverage is uneven, not random.** Bibliographic sources cover
 publisher-deposited references far better than preprints. A thin citation graph

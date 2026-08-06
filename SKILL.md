@@ -56,6 +56,7 @@ Every script prints JSON.
 | Script | Does |
 |---|---|
 | `init.py` | Create the project layout, link the corpus read-only, instantiate the six governance docs, write `state/progress.json` |
+| `corpus_portrait.py` | Describe the corpus as filed: sizes, year spread per category, categories that read alike, shared vocabulary, papers that resist their category, groups that straddle boundaries. Proposes nothing |
 | `gate.py` | Report gate readiness; `--open` records the crossing once criteria and signature are in |
 | `build_bib.py` | `papers.jsonl` → `inputs/references.bib` plus a blocking-gap report |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md`. Ungated |
@@ -104,14 +105,14 @@ whole corpus.** Get the schema wrong and you re-extract everything. Everything
 else is cheap and freely revisable.
 
 ```
-    ┌──────────────────────────────────────────────┐
-    │  read papers → sharpen the axis → name the   │
-    │  sections → sketch the schema → test it on   │
-    │  a handful of papers → find it wrong → back  │
-    └───────────────────┬──────────────────────────┘
-                        │   the extraction gate
-                        ▼
-              extract over the corpus  ⇄  draft
+    describe the corpus  →  ┌───────────────────────────────────────────┐
+    (once, before any       │  read papers → sharpen the axis → name    │
+     axis is on the table)  │  the sections → sketch the schema → test  │
+                            │  it on a handful → find it wrong → back   │
+                            └──────────────────┬────────────────────────┘
+                                               │   the extraction gate
+                                               ▼
+                                     extract over the corpus  ⇄  draft
 ```
 
 Spin the loop as long as it is still paying. `gate.py` guards only the crossing.
@@ -135,6 +136,51 @@ Confirm the corpus is stable, then build the bibliography.
   becomes the canonical ID for filenames, card front matter, provenance and
   citations. Collisions get letter suffixes (`smith2024a`), never numbers.
 
+### Before any axis: describe the corpus back to the expert
+
+**The first thing this skill produces is a portrait of the corpus, not a
+proposal.** Not an axis, not a menu of candidate axes, not an outline. A large
+corpus cannot be characterized in one pass, and nobody — you or the expert — can
+name its organizing variable before it has been described. Asking on day one
+which axis to use puts the whole survey's contribution on a question neither
+side has yet earned the right to answer.
+
+`corpus_portrait.py` does the mechanical half. It reports size, year spread,
+each filed category's trajectory, which categories read alike, the vocabulary
+they share, the papers that sit closer to a category other than the one they are
+filed under, and the authors and venues that work on both sides of a filed
+boundary. It proposes nothing, deliberately — every number in it describes the
+*reading* taxonomy, which is exactly the structure the survey must not inherit.
+
+Then do the half no script can. Read: `corpus/TOPIC.md`, abstracts across every
+category, and the full text of whatever the numbers made interesting — start
+with the papers that resist their category and the categories that read alike.
+Reading is never gated; run `extract_fulltext.py` over everything if it helps.
+
+Then write the expert a portrait in prose:
+
+- what this corpus is, as it stands, in a paragraph
+- what is growing and what has gone quiet — with the caveat attached, because a
+  year distribution reflects when the corpus was collected, not when the field
+  moved
+- where the filed categories blur: the shared vocabulary, the straddling groups,
+  the papers that resist their folder, **named**, not counted
+- the tensions you noticed while reading that no number would have shown
+- what you could not tell from here, and what reading would settle it
+
+End with questions, not options: what do they recognize, what surprises them,
+which of these blurred boundaries is real and which is a naming artifact, which
+papers in that list would they defend as correctly filed. The expert's expertise
+lives in those answers. It does not live in picking an option from a list.
+
+Nothing is decided in this round. Expect several.
+
+Do not file the portrait as a document. The numbers are re-derivable by re-running
+the script, and a stale copy of them is exactly the second home for one fact this
+scheme exists to prevent. What survives the expert's reaction — a tension they
+confirmed, a boundary they called an artifact — is a cross-paper finding and
+belongs in `FINDINGS.md`, one line in the index, marked as an observation.
+
 ### The loop: reading, axis, sections, schema
 
 These four move together. Treating them as ordered steps is the mistake.
@@ -152,9 +198,37 @@ What the loop is trying to produce, and what it keeps revising:
 | **The sections** | a list, and for each, the dimensions it compares across papers |
 | **The schema** | a card field for each of those dimensions, per paper type |
 
-Record candidate axes you considered and rejected, with the reason, in
-`DECISIONS.md`. This is cheap and it stops the loop from circling back into an
-axis already tried and abandoned three sessions ago.
+Every candidate axis goes in the table at the top of `DECISIONS.md` — the one
+under test as well as the ones that failed, each with the papers named in advance
+to break it. This is cheap and it stops the loop from circling back into an axis
+already tried and abandoned three sessions ago.
+
+#### How the axis conversation converges
+
+The axis is reached by successive approximation. Each round costs the expert one
+*reaction*, not one decision, and each round brings more evidence than the last.
+
+| Round | You bring | You ask for |
+|---|---|---|
+| Portrait | what is in the corpus and where it blurs | recognition, correction, what surprises them |
+| Tensions | two to four specific disagreements the corpus contains, each with the papers on both sides | which are real disputes and which are vocabulary |
+| A candidate | **one** candidate axis: what it is, which awkward papers it places, which papers you expect to break it | whether it cuts at a joint they recognize |
+| The cut | the axis sentence, the section list, what each section compares | approval — or the next re-cut |
+
+**One candidate at a time.** A menu of three axes asks the expert to do the
+comparison work without the evidence you are holding; what comes back is a
+preference rather than a judgment, if anything comes back at all. Bring the
+candidate you currently believe, say plainly what it places and what it does not,
+and name the papers you expect to break it *before* you test them.
+
+**Ground every question in specific papers.** "Should the axis be A or B" is
+unanswerable. "These nine papers are filed under both retrieval and generation,
+and three of them read as the same method — is that distinction real to you, or
+is it two communities naming one thing twice?" is a question an expert can answer
+in one sentence, and the answer moves the axis.
+
+**A round ending in "none of these" is a result**, not a failure. Record what
+failed and why in `DECISIONS.md`, then go back to reading.
 
 **Test the schema on a handful of papers before crossing the gate.** Pick five or
 six that stress it — an easy one, a benchmark paper, a position paper, and the
@@ -251,7 +325,14 @@ There is no `CHANGES.md`. `git diff` is the change log; `DECISIONS.md` is why.
   appendix tables with a disclaimer.
 - **Claim strength ≤ evidence strength.** `demonstrates > suggests > may >
   hypothesize`. Pick the rung the evidence actually reaches.
-- **Ask on domain calls.** Taxonomy boundaries, anchor selection, inclusion.
+- **Ask on domain calls** — taxonomy boundaries, anchor selection, inclusion —
+  and ask in prose, grounded in named papers, one question at a time.
+- **Never offer a menu of candidate axes**, and never ask which axis to use
+  before the corpus has been described. The organizing variable is the survey's
+  contribution; it is earned by reading and converged on over several rounds. A
+  multiple-choice question hands the expert the one job that cannot be delegated
+  back, at the moment when neither of you can answer it, and the honest reply is
+  "none of these". Bring one candidate with its evidence, or bring the corpus.
 - **Never open the gate by hand.** `gate.py --open` or not at all.
 - **Name things in words.** No internal codenames, letter-number labels or
   private shorthand — not in filenames, not in documents, and above all not when

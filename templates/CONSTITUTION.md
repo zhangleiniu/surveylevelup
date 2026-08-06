@@ -20,6 +20,11 @@ _To be written._
 
 <!-- One sentence naming the organizing variable. This is the survey's
      contribution; everything downstream derives from it.
+
+     It stays "not yet derived" until the corpus has been described, the
+     tensions named, and a candidate tested against the papers picked in advance
+     to break it. A candidate under test lives in DECISIONS.md, not here; this
+     line holds only what the expert has approved.
      See references/thesis-derivation.md. -->
 
 _Not yet derived._
