@@ -59,6 +59,24 @@ CANNED = {
 _attempts = {}
 
 
+def preflight(model: str | None, **opts) -> dict:
+    problems = []
+    if not model:
+        problems.append({"code": "model_missing",
+                         "message": "an exact model id is required"})
+    if os.environ.get("SURVEYLEVELUP_FAKE_PREFLIGHT") == "fail":
+        problems.append({"code": "simulated_failure",
+                         "message": "simulated backend preflight failure"})
+    return {
+        "backend": "fake",
+        "model": model,
+        "ready": not problems,
+        "network_call": False,
+        "paid_call": False,
+        "problems": problems,
+    }
+
+
 def generate(prompt: str, model: str, **opts) -> str:
     path = os.environ.get("SURVEYLEVELUP_FAKE_CARD")
     if path:

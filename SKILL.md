@@ -49,6 +49,7 @@ the directory containing `state/progress.json`.
 ```bash
 python3 ~/.claude/skills/surveylevelup/scripts/init.py --corpus <paperlevelup topic dir> --project <new dir>
 python3 ~/.claude/skills/surveylevelup/scripts/gate.py --status
+python3 ~/.claude/skills/surveylevelup/scripts/doctor.py --project <survey project>
 ```
 
 Every script prints JSON.
@@ -58,6 +59,8 @@ Every script prints JSON.
 | `init.py` | Create the project layout, link the corpus read-only, instantiate the six governance docs, write `state/progress.json` |
 | `corpus_portrait.py` | Describe the corpus as filed: sizes, year spread per category, categories that read alike, shared vocabulary, papers that resist their category, groups that straddle boundaries. Proposes nothing |
 | `gate.py` | Report gate readiness; `--open` records the crossing once criteria and signature are in |
+| `configure_extraction.py` | Record non-sensitive project defaults: backend, exact model, cloud project and location. Never credentials |
+| `doctor.py` | Read-only report of Python dependencies, backend/ADC readiness, project resolution, gate scope and trial readiness. Calls no model |
 | `build_bib.py` | `papers.jsonl` → `inputs/references.bib` plus a blocking-gap report |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md`. Ungated |
 | `extract_cards.py` | Run a type-specific card prompt with a declared backend/model; enforce the gate before calling it; stamp provenance; `--verify-evidence` checks quoted spans against full text |
@@ -83,6 +86,7 @@ Every script prints JSON.
 │   └── cards/<type>/<bibkey>.md
 ├── state/
 │   ├── progress.json      gate state, signatures, counts
+│   ├── extraction.json    optional non-sensitive backend/model/project defaults
 │   ├── card_assignments.json   optional until `--all`; bibkey → applicable card types
 │   ├── friction.md        where this skill got in the way — append in the moment
 │   └── stances.jsonl      optional; see below
@@ -270,6 +274,34 @@ which cards are superseded, and cross again. What the gate prevents is doing tha
 
 ### Extraction and drafting
 
+Before reporting that a backend is configured or missing, run `doctor.py`.
+Keep three states separate in both reasoning and conversation:
+
+- **survey readiness** — axis, sections, schema and trial papers
+- **the extraction gate** — closed permits nominated trial papers; open permits
+  corpus-wide extraction
+- **backend readiness** — SDK, credentials, cloud project, location and exact model
+
+Never say that Vertex is unconfigured merely because `GOOGLE_CLOUD_PROJECT` is
+unset. The Vertex preflight resolves the project in this order: command line,
+`state/extraction.json`, `GOOGLE_CLOUD_PROJECT`, then Application Default
+Credentials. Report the exact missing prerequisite: SDK, credentials, project or
+model. A closed gate is expected during trial extraction and is not a backend
+failure.
+
+Project defaults are optional and contain no credentials:
+
+```bash
+python3 ~/.claude/skills/surveylevelup/scripts/configure_extraction.py \
+  --project <survey project> --backend vertex --model gemini-3.6-flash \
+  --backend-project <google-cloud-project> --backend-location global
+```
+
+Command-line values override project defaults. Every card still records the
+actual prompt digest, backend, exact model, cloud project and location, so using
+a default never weakens provenance. Credentials stay in ADC or provider
+environment variables and are never written to the survey project.
+
 Run `extract_cards.py --keys ...` on the trial papers, then `cards.py --check` and
 `extract_cards.py --verify-evidence`. The prompt supplies project-specific field
 semantics; the runner appends the shared output and evidence protocol, so the
@@ -364,6 +396,8 @@ There is no `CHANGES.md`. `git diff` is the change log; `DECISIONS.md` is why.
   back, at the moment when neither of you can answer it, and the honest reply is
   "none of these". Bring one candidate with its evidence, or bring the corpus.
 - **Never open the gate by hand.** `gate.py --open` or not at all.
+- **Diagnose before declaring a backend unavailable.** Run `doctor.py`; name the
+  missing prerequisite, and do not conflate backend readiness with the gate.
 - **Name things in words.** No internal codenames, letter-number labels or
   private shorthand — not in filenames, not in documents, and above all not when
   talking to the expert. `method_card.md`, not `P1.md`. "the extraction gate", not

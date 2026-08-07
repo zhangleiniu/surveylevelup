@@ -15,6 +15,10 @@ installed; the optional dependency is in requirements-vertex.txt.
 """
 
 import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 from . import BackendError, GenerationResult, TransientError
 
@@ -23,6 +27,9 @@ from . import BackendError, GenerationResult, TransientError
 # bills actual usage, not this ceiling. Gemini 3.6 Flash accepts 65,536.
 DEFAULT_MAX_TOKENS = 65_536
 
+CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+SKILL_ROOT = Path(__file__).resolve().parents[2]
+
 # Vertex reports transient conditions as message text on a generic exception
 # more often than as a typed error, so match on the text as well.
 _TRANSIENT_MARKERS = ("429", "500", "502", "503", "504", "resource exhausted",
@@ -30,19 +37,211 @@ _TRANSIENT_MARKERS = ("429", "500", "502", "503", "504", "resource exhausted",
                       "rate limit", "timeout", "overloaded")
 
 
-def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
-             timeout: float = 600.0, **opts) -> GenerationResult:
+def _load_sdk():
+    from google import genai
+    from google.genai import types
+    return genai, types
+
+
+def _load_adc():
+    import google.auth
+    return google.auth.default(scopes=[CLOUD_SCOPE])
+
+
+def _gcloud_adc_available() -> bool:
+    if not shutil.which("gcloud"):
+        return False
     try:
-        from google import genai
-        from google.genai import types
+        result = subprocess.run(
+            ["gcloud", "auth", "application-default", "print-access-token"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _gcloud_default_project() -> str | None:
+    if not shutil.which("gcloud"):
+        return None
+    try:
+        result = subprocess.run(
+            ["gcloud", "config", "get-value", "project"],
+            capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and value and value != "(unset)" else None
+
+
+def _gcloud_vertex_api_enabled(project: str) -> bool | None:
+    """True/False when gcloud can answer; None when the check is unavailable."""
+    if not project or not shutil.which("gcloud"):
+        return None
+    try:
+        result = subprocess.run(
+            ["gcloud", "services", "list", "--enabled", "--project", project,
+             "--filter=config.name:aiplatform.googleapis.com",
+             "--format=value(config.name)"],
+            capture_output=True, text=True, timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode:
+        return None
+    return "aiplatform.googleapis.com" in result.stdout.split()
+
+
+def _resolve_project(explicit: str | None = None) -> tuple[str | None, str | None]:
+    if explicit:
+        return explicit, "argument_or_project_config"
+    environmental = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if environmental:
+        return environmental, "GOOGLE_CLOUD_PROJECT"
+    try:
+        _credentials, adc_project = _load_adc()
+    except Exception:
+        return None, None
+    return (adc_project, "application_default_credentials") if adc_project else (None, None)
+
+
+def preflight(model: str | None, project: str | None = None,
+              location: str | None = None, project_source: str | None = None,
+              location_source: str | None = None,
+              check_service: bool = False, **opts) -> dict:
+    """Verify local Vertex prerequisites without calling a model."""
+    problems = []
+    genai = None
+    try:
+        genai, _types = _load_sdk()
+    except ImportError:
+        problems.append({
+            "code": "sdk_missing",
+            "message": "the Vertex SDK is not installed",
+            "fix": f"{sys.executable} -m pip install -r "
+                   f"{SKILL_ROOT / 'requirements-vertex.txt'}",
+        })
+
+    credentials_available = False
+    credential_source = None
+    adc_project = None
+    adc_error = None
+    try:
+        credentials, adc_project = _load_adc()
+        credentials_available = credentials is not None
+        credential_source = "google_auth_default"
+    except Exception as exc:
+        adc_error = exc
+        credentials_available = _gcloud_adc_available()
+        if credentials_available:
+            credential_source = "gcloud_application_default_credentials"
+    if not credentials_available:
+        problems.append({
+            "code": "credentials_missing",
+            "message": "Application Default Credentials are unavailable"
+                       + (f": {_brief(adc_error)}" if adc_error else ""),
+            "fix": "gcloud auth application-default login",
+        })
+
+    gcloud_project = _gcloud_default_project()
+
+    resolved_project = project or os.environ.get("GOOGLE_CLOUD_PROJECT") or adc_project
+    if project:
+        resolved_project_source = project_source or "argument_or_project_config"
+    elif os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        resolved_project_source = "GOOGLE_CLOUD_PROJECT"
+    elif adc_project:
+        resolved_project_source = "application_default_credentials"
+    else:
+        resolved_project_source = None
+    if not resolved_project:
+        configure = (f"{sys.executable} {SKILL_ROOT / 'scripts' / 'configure_extraction.py'} "
+                     f"--project SURVEY_PROJECT --backend vertex --model "
+                     f"{model or 'EXACT_MODEL_ID'}")
+        fix = (f"{configure} --backend-project {gcloud_project}, set "
+               "GOOGLE_CLOUD_PROJECT, or set an ADC quota/default project"
+               if gcloud_project else
+               f"{configure} --backend-project GOOGLE_CLOUD_PROJECT_ID, set "
+               "GOOGLE_CLOUD_PROJECT, or set an ADC quota/default project")
+        problems.append({
+            "code": "project_missing",
+            "message": "no Google Cloud project was resolved",
+            "detected_gcloud_default": gcloud_project,
+            "fix": fix,
+        })
+
+    resolved_location = location or os.environ.get("GOOGLE_CLOUD_LOCATION") or "global"
+    if location:
+        resolved_location_source = location_source or "argument_or_project_config"
+    elif os.environ.get("GOOGLE_CLOUD_LOCATION"):
+        resolved_location_source = "GOOGLE_CLOUD_LOCATION"
+    else:
+        resolved_location_source = "default"
+    if not model:
+        problems.append({"code": "model_missing",
+                         "message": "an exact Vertex model id is required"})
+
+    service_enabled = (_gcloud_vertex_api_enabled(resolved_project)
+                       if check_service and resolved_project else None)
+    if service_enabled is False:
+        problems.append({
+            "code": "vertex_api_disabled",
+            "message": "aiplatform.googleapis.com is not enabled for the resolved project",
+            "fix": f"gcloud services enable aiplatform.googleapis.com "
+                   f"--project {resolved_project}",
+        })
+
+    return {
+        "backend": "vertex",
+        "model": model,
+        "ready": not problems,
+        "sdk": {
+            "package": "google-genai",
+            "available": genai is not None,
+            "version": getattr(genai, "__version__", None) if genai else None,
+        },
+        "authentication": {
+            "method": "application_default_credentials",
+            "available": credentials_available,
+            "source": credential_source,
+            "verified_with_model_call": False,
+        },
+        "service": {
+            "name": "aiplatform.googleapis.com",
+            "enabled": service_enabled,
+            "checked": service_enabled is not None,
+            "attempted": bool(check_service and resolved_project),
+        },
+        "resolved": {
+            "project": resolved_project,
+            "project_source": resolved_project_source,
+            "location": resolved_location,
+            "location_source": resolved_location_source,
+            "gcloud_default_project_not_implicitly_used": gcloud_project,
+        },
+        "network_call": (credential_source == "gcloud_application_default_credentials"
+                         or bool(check_service and resolved_project)),
+        "paid_call": False,
+        "problems": problems,
+    }
+
+
+def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
+             timeout: float = 600.0, project: str | None = None,
+             location: str | None = None, **opts) -> GenerationResult:
+    try:
+        genai, types = _load_sdk()
     except ImportError:
         raise BackendError(
-            "the Vertex SDK is not installed; pip install google-genai") from None
+            "the Vertex SDK is not installed; "
+            f"{sys.executable} -m pip install -r "
+            f"{SKILL_ROOT / 'requirements-vertex.txt'}") from None
 
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    project, _project_source = _resolve_project(project)
     if not project:
-        raise BackendError("GOOGLE_CLOUD_PROJECT is not set")
-    location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
+        raise BackendError(
+            "no Google Cloud project was resolved; configure --backend-project, "
+            "set GOOGLE_CLOUD_PROJECT, or set an ADC quota/default project")
+    location = location or os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
     client = None
     try:

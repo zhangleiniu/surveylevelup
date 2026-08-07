@@ -150,7 +150,7 @@ class TestProvenance(ProjectCase):
         self.assertEqual(parsed["front"]["bibkey"], "goodpaper2024x")
         self.assertNotIn("```", self.card("goodpaper2024x").read_text())
 
-    def test_dry_run_calls_no_backend_and_reports_the_estimate(self):
+    def test_dry_run_calls_no_model_and_reports_the_estimate(self):
         code, out = run(self.project, "--type", "method", "--keys", "goodpaper2024x",
                         "--backend", "fake", "--model", "fake-model-1", "--dry-run")
         self.assertEqual(code, 0, out)

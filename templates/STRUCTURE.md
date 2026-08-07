@@ -30,6 +30,7 @@ and how things are named.
 │
 ├── state/                                                       [written by scripts]
 │   ├── progress.json      gate state, signatures, trial papers, counts
+│   ├── extraction.json    optional backend/model/project defaults; no credentials
 │   ├── card_assignments.json   bibkey → applicable card types; required by `--all`
 │   ├── friction.md        feedback to the skill, not about this survey  [append-only]
 │   └── stances.jsonl      optional; contested citation pairs only

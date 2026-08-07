@@ -37,6 +37,9 @@ The skill's own manual is `~/.claude/skills/surveylevelup/SKILL.md`, with
   curated-corpus disclaimer.
 - **Claim strength ≤ evidence strength.**
 - **Never open the extraction gate by hand** — `gate.py --open` or not at all.
+- **Run `doctor.py` before declaring a backend unavailable.** Backend readiness
+  and the extraction gate are separate: a closed gate still permits nominated
+  trial papers. Name the missing SDK, credential, project or model precisely.
 - **Name things in words.** No codenames, no letter-number labels, not in
   filenames and not in conversation.
 - **Corpus changes go through `paperlevelup`**, then re-run `build_bib.py` here.
@@ -75,6 +78,7 @@ The skill's own manual is `~/.claude/skills/surveylevelup/SKILL.md`, with
 | Axis | not derived — see DECISIONS.md for candidates under test |
 | Sections | not defined |
 | Schema | not designed |
+| Extraction backend | not diagnosed — run `doctor.py` before card extraction |
 | Extraction gate | **closed** |
 | Cards | none |
 | Findings | none |

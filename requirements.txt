@@ -1,4 +1,5 @@
 pymupdf
 
 # Model SDKs are optional and imported lazily. Install requirements-vertex.txt
-# only when using --backend vertex. The offline fake backend needs nothing.
+# or requirements-anthropic.txt only for the backend in use. The offline fake
+# backend needs nothing.

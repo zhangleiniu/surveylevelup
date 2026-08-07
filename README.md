@@ -77,7 +77,7 @@ crossing by accident.
 ## Quickstart
 
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 python3 ~/.claude/skills/surveylevelup/scripts/init.py \
     --corpus ~/Papers/<topic> --project ~/work/<topic>-survey \
@@ -93,10 +93,35 @@ python3 ~/.claude/skills/surveylevelup/scripts/gate.py --status
 The card runner has optional model dependencies. For Vertex/Gemini:
 
 ```bash
-pip install -r ~/.claude/skills/surveylevelup/requirements-vertex.txt
+python3 -m pip install -r ~/.claude/skills/surveylevelup/requirements-vertex.txt
 export GOOGLE_CLOUD_PROJECT="your-project"
 export GOOGLE_CLOUD_LOCATION="global"
 ```
+
+For Anthropic instead:
+
+```bash
+python3 -m pip install -r ~/.claude/skills/surveylevelup/requirements-anthropic.txt
+export ANTHROPIC_API_KEY="..."
+```
+
+Record reusable, non-sensitive defaults in the survey project, then diagnose
+the complete state without calling a model:
+
+```bash
+python3 ~/.claude/skills/surveylevelup/scripts/configure_extraction.py \
+  --project ~/work/<topic>-survey \
+  --backend vertex --model gemini-3.6-flash \
+  --backend-project your-project --backend-location global
+
+python3 ~/.claude/skills/surveylevelup/scripts/doctor.py \
+  --project ~/work/<topic>-survey
+```
+
+`state/extraction.json` never contains credentials. Vertex resolves its project
+from command-line values, that project file, `GOOGLE_CLOUD_PROJECT`, then ADC.
+The doctor reports backend readiness separately from the extraction gate: a
+closed gate still permits nominated trial papers.
 
 Then read [`SKILL.md`](SKILL.md) — it is the operating manual.
 
@@ -112,7 +137,7 @@ Then read [`SKILL.md`](SKILL.md) — it is the operating manual.
 ├── STRUCTURE.md       file map: read-only evidence vs writable output
 ├── corpus/        →   a paperlevelup topic folder            [read-only]
 ├── inputs/            bib, full text, prompts, cards         [producer-owned evidence]
-├── state/             gate state, card assignments, counts, optional stances
+├── state/             gate state, extraction defaults, card assignments, counts
 ├── drafts/v1/
 └── archive/           superseded documents live here, not in the root
 ```
@@ -130,6 +155,8 @@ root with a warning label, because that is the same fact living in two places.
 | `build_bib.py` | Corpus sidecar → `references.bib`, plus a gap report that only flags what actually blocks |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md` via PyMuPDF. Ungated |
 | `gate.py` | Report gate readiness; `--open --signed-by` records the crossing |
+| `configure_extraction.py` | Store non-sensitive backend/model/project defaults; never credentials |
+| `doctor.py` | Read-only dependency, ADC, project, model, gate-scope and trial-readiness report; calls no model |
 | `extract_cards.py` | Run card prompts through `vertex`, `anthropic` or the offline `fake` backend; enforce the gate; reject truncated/invalid responses before writing; stamp and verify provenance |
 | `cards.py` | Validate cards against the field block their prompt declares; `--aggregate` includes distributions and repeated FREE TEXT suggestions |
 
@@ -171,6 +198,7 @@ python3 ~/.claude/skills/surveylevelup/scripts/extract_cards.py \
 ```bash
 tests/smoke.sh
 python3 tests/test_extract_cards.py
+python3 tests/test_backend_setup.py
 ```
 
 These run offline against throwaway projects. The explicit paid integration test

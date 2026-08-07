@@ -159,6 +159,9 @@ def main():
 
     print_json({"gate": "open" if progress.gate_open else "closed",
                 "signed_by": progress.data.get("gate", {}).get("signed_by"),
+                "scope": "corpus-wide card extraction; nominated trial papers "
+                         "may run while closed",
+                "backend_readiness": "separate; run doctor.py",
                 **report})
 
 

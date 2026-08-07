@@ -143,13 +143,22 @@ PAPER
 done
 python3 "$S/gate.py" --project "$WORK" --trial trial2024a trial2024b >/dev/null
 
+python3 "$S/configure_extraction.py" --project "$WORK" \
+  --backend fake --model smoke-model-1 >/dev/null
+[ -f "$WORK/state/extraction.json" ] || fail "extraction config not written"
+OUT="$(python3 "$S/doctor.py" --project "$WORK")"
+echo "$OUT" | grep -q '"ready": true' || fail "doctor did not find the fake backend ready"
+echo "$OUT" | grep -q '"trial_extraction": "allowed_for_nominated_papers"' \
+  || fail "doctor confused the closed gate with trial extraction readiness"
+ok "doctor separates backend readiness from the extraction gate"
+
 OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
-  --keys trial2024a --backend fake --model smoke-model-1 --dry-run)"
+  --keys trial2024a --dry-run)"
 echo "$OUT" | grep -q '"dry_run": true' || fail "dry run not reported as such"
 echo "$OUT" | grep -q '"input_tokens_estimate_total"' || fail "no token estimate"
 echo "$OUT" | grep -q '"model": "smoke-model-1"' || fail "dry run hid the model"
 if [ -f "$WORK/inputs/cards/method/trial2024a.md" ]; then fail "dry run wrote a card"; fi
-ok "dry run reports the plan and writes nothing"
+ok "project backend defaults drive a dry run without writing"
 
 if python3 "$S/extract_cards.py" --project "$WORK" --type method \
      --keys outside2024c --backend fake --model smoke-model-1 >/dev/null 2>&1; then
@@ -223,6 +232,8 @@ ok "verify-evidence flags a quote that is not in the full text"
 
 python3 "$T/test_extract_cards.py" 2>&1 | tail -1 | grep -q '^OK' \
   || fail "extract_cards unit tests failed (run tests/test_extract_cards.py)"
-ok "extract_cards unit tests pass"
+python3 "$T/test_backend_setup.py" 2>&1 | tail -1 | grep -q '^OK' \
+  || fail "backend setup tests failed (run tests/test_backend_setup.py)"
+ok "extract_cards and backend setup unit tests pass"
 
 echo "all smoke checks passed"

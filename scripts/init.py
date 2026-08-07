@@ -15,6 +15,8 @@ from pathlib import Path
 
 from common import (GOVERNANCE_DOCS, TEMPLATE_DIR, Progress, die, print_json,
                     today)
+from extraction_config import (ExtractionConfigError, config_path,
+                               save_config, validate_config)
 
 SUBDIRS = (
     "inputs/fulltext",
@@ -62,9 +64,31 @@ def main():
                         help="recorded in CONSTITUTION.md; build_bib.py implements this default")
     parser.add_argument("--copy-corpus", action="store_true",
                         help="copy the corpus instead of symlinking it (not recommended)")
+    parser.add_argument("--backend", default=None,
+                        help="default card backend; stored without credentials")
+    parser.add_argument("--model", default=None,
+                        help="exact default model id; stored without credentials")
+    parser.add_argument("--backend-project", default=None,
+                        help="Google Cloud project id; Vertex only")
+    parser.add_argument("--backend-location", default=None,
+                        help="provider location; Vertex defaults to global")
     parser.add_argument("--force", action="store_true",
                         help="overwrite governance documents that already exist")
     args = parser.parse_args()
+
+    extraction_values = {
+        "backend": args.backend,
+        "model": args.model,
+        "project": args.backend_project,
+        "location": args.backend_location,
+    }
+    requested_extraction = any(extraction_values.values())
+    if requested_extraction:
+        try:
+            validate_config({k: v for k, v in extraction_values.items() if v},
+                            require_pair=True)
+        except ExtractionConfigError as exc:
+            die(str(exc), note="no project files were written")
 
     corpus = Path(args.corpus).expanduser().resolve()
     if not corpus.is_dir():
@@ -111,6 +135,24 @@ def main():
     else:
         state = "kept (already present)"
 
+    if requested_extraction:
+        try:
+            extraction_path = save_config(project, extraction_values)
+        except ExtractionConfigError as exc:
+            die(str(exc), note="the survey project was initialized, but extraction "
+                "defaults were not written")
+        extraction_state = {"status": "written", "path": str(extraction_path),
+                            "values": {k: v for k, v in extraction_values.items() if v},
+                            "credentials_stored": False}
+    elif config_path(project).is_file():
+        extraction_state = {"status": "kept (already present)",
+                            "path": str(config_path(project)),
+                            "credentials_stored": False}
+    else:
+        extraction_state = {"status": "not configured",
+                            "path": str(config_path(project)),
+                            "credentials_stored": False}
+
     friction = project / "state" / "friction.md"
     if not friction.exists():
         friction.write_text(
@@ -137,6 +179,7 @@ def main():
         "corpus_papers": n_papers,
         "governance_docs": docs,
         "progress": state,
+        "extraction": extraction_state,
         "gate": "closed",
         "next": [
             "python build_bib.py   # then fix any blocking gaps upstream in the corpus",
@@ -145,6 +188,7 @@ def main():
             "they recognize — do NOT ask them to pick an axis; the axis is converged "
             "on over several rounds. See SKILL.md and references/thesis-derivation.md",
             "fill in scope and the inclusion rule in CONSTITUTION.md as they settle",
+            "before card extraction: python doctor.py --project <survey-project>",
         ],
     })
 

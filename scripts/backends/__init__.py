@@ -56,6 +56,44 @@ def load(name: str):
     return importlib.import_module(f"{__name__}.{name}")
 
 
+def preflight(backend: str, model: str | None, **opts) -> dict:
+    """Check a backend without generating content or incurring model usage.
+
+    Preflights return structured diagnostics rather than raising, so both the
+    doctor and the extraction runner can explain the exact missing prerequisite.
+    """
+    if backend not in KNOWN:
+        return {
+            "backend": backend,
+            "model": model,
+            "ready": False,
+            "problems": [{
+                "code": "unknown_backend",
+                "message": f"unknown backend {backend!r}",
+                "known_backends": list(KNOWN),
+            }],
+        }
+    try:
+        module = load(backend)
+        check = getattr(module, "preflight")
+        status = check(model, **opts)
+    except Exception as exc:
+        return {
+            "backend": backend,
+            "model": model,
+            "ready": False,
+            "problems": [{
+                "code": "preflight_error",
+                "message": f"{type(exc).__name__}: {str(exc).splitlines()[0][:200]}",
+            }],
+        }
+    status.setdefault("backend", backend)
+    status.setdefault("model", model)
+    status.setdefault("problems", [])
+    status["ready"] = bool(status.get("ready")) and not status["problems"]
+    return status
+
+
 def generate(backend: str, prompt: str, model: str, attempts: int = 4,
              base_delay: float = 2.0, sleep=time.sleep, **opts) -> GenerationResult:
     """Call a backend, retrying transient failures with exponential backoff.

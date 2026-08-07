@@ -35,6 +35,7 @@ from pathlib import Path
 import backends
 from common import (Progress, add_project_arg, card_problems, die, find_project,
                     load_prompts, now_iso, parse_card, print_json)
+from extraction_config import ExtractionConfigError, resolve
 
 # Roughly four characters to a token. Good enough to decide whether a run is
 # affordable; never presented as a measurement.
@@ -374,8 +375,13 @@ def main():
                         help=f"one of: {', '.join(backends.KNOWN)}")
     parser.add_argument("--model", default=None,
                         help="exact backend model id; recorded in every card")
+    parser.add_argument("--backend-project", default=None,
+                        help="Google Cloud project id; overrides project extraction config")
+    parser.add_argument("--backend-location", default=None,
+                        help="provider location; overrides project extraction config")
     parser.add_argument("--dry-run", action="store_true",
-                        help="report the plan and the token estimate; call no backend")
+                        help="run read-only backend preflight and report the plan/token "
+                             "estimate; call no model and write nothing")
     parser.add_argument("--force", action="store_true",
                         help="re-run and replace an existing card in the same artifact cohort")
     parser.add_argument("--verify-evidence", action="store_true",
@@ -440,12 +446,25 @@ def run_verify(project: Path, prompts: dict, args) -> None:
 def run_extract(project: Path, prompts: dict, args) -> None:
     if not args.type:
         die("--type is required", known_types=sorted(prompts))
-    if not args.backend:
-        die("--backend is required", known_backends=list(backends.KNOWN))
-    if args.backend not in backends.KNOWN:
-        die(f"unknown backend {args.backend!r}", known_backends=list(backends.KNOWN))
-    if not args.model:
-        die("--model is required",
+    try:
+        extraction = resolve(project, {
+            "backend": args.backend,
+            "model": args.model,
+            "project": args.backend_project,
+            "location": args.backend_location,
+        })
+    except ExtractionConfigError as exc:
+        die(str(exc))
+    selected = extraction["values"]
+    backend = selected.get("backend")
+    model = selected.get("model")
+    if not backend:
+        die("--backend is required (or configure state/extraction.json)",
+            known_backends=list(backends.KNOWN))
+    if backend not in backends.KNOWN:
+        die(f"unknown backend {backend!r}", known_backends=list(backends.KNOWN))
+    if not model:
+        die("--model is required (or configure state/extraction.json)",
             why="the model id is part of a card's identity and is recorded in "
                 "its front matter; the runner will not guess it")
 
@@ -491,8 +510,8 @@ def run_extract(project: Path, prompts: dict, args) -> None:
     # or models is heterogeneous even if every individual card validates.
     requested_cohort = {
         "prompt_sha256": digest,
-        "backend": args.backend,
-        "model": args.model,
+        "backend": backend,
+        "model": model,
     }
     known = existing_cohorts(project, card_type)
     conflicting = {}
@@ -521,6 +540,29 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             "note": "no card was written",
         })
         raise SystemExit(1)
+
+    # Read-only readiness check, once per run and before any card can be written.
+    # The extraction gate above remains a separate concern: a closed gate still
+    # permits nominated trial papers when the backend is ready.
+    backend_status = backends.preflight(
+        backend, model,
+        project=selected.get("project"),
+        location=selected.get("location"),
+        project_source=extraction["sources"].get("project"),
+        location_source=extraction["sources"].get("location"),
+    )
+    if not backend_status.get("ready"):
+        print_json({
+            "refused": "backend_not_ready",
+            "backend": backend_status,
+            "gate": "open" if gate_open else "closed",
+            "trial_extraction": (
+                "allowed_for_nominated_papers" if not gate_open else "allowed"),
+            "note": "no model was called and no card was written; run doctor.py "
+                    "for the combined survey/backend report",
+        })
+        raise SystemExit(1)
+    runtime = backend_status.get("resolved", {})
 
     written, invalid, failed, skipped, planned = [], [], [], [], []
     total_estimate = 0
@@ -557,8 +599,10 @@ def run_extract(project: Path, prompts: dict, args) -> None:
 
         try:
             result = backends.generate(
-                args.backend, request, args.model,
-                attempts=args.attempts, max_tokens=args.max_output_tokens)
+                backend, request, model,
+                attempts=args.attempts, max_tokens=args.max_output_tokens,
+                project=runtime.get("project"),
+                location=runtime.get("location"))
         except backends.BackendError as exc:
             failed.append({"bibkey": bibkey, "status": "backend_error",
                            "error": str(exc)})
@@ -569,8 +613,8 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             "card_type": card_type,
             "prompt": prompt_file.name,
             "prompt_sha256": digest,
-            "model": args.model,
-            "backend": args.backend,
+            "model": model,
+            "backend": backend,
             "generated": now_iso(),
             "fulltext_sha256": fulltext_digest,
             "max_output_tokens": args.max_output_tokens,
@@ -618,8 +662,10 @@ def run_extract(project: Path, prompts: dict, args) -> None:
     payload = {
         "project": str(project),
         "card_type": card_type,
-        "backend": args.backend,
-        "model": args.model,
+        "backend": backend,
+        "model": model,
+        "extraction_config": extraction,
+        "backend_preflight": backend_status,
         "prompt": prompt_file.name,
         "prompt_sha256": digest,
         "max_output_tokens": args.max_output_tokens,
@@ -658,8 +704,8 @@ def run_extract(project: Path, prompts: dict, args) -> None:
         payload["note"] = ("schema-invalid responses were rejected before writing; "
                            "fix the prompt or producer, then re-run")
 
-    progress.log("extract_cards", card_type=card_type, backend=args.backend,
-                 model=args.model, prompt_sha256=digest,
+    progress.log("extract_cards", card_type=card_type, backend=backend,
+                 model=model, prompt_sha256=digest,
                  max_output_tokens=args.max_output_tokens,
                  written=len(written), invalid=len(invalid),
                  failed=len(failed), skipped=len(skipped), usage=usage_totals)
