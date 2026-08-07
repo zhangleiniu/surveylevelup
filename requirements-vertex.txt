@@ -1,0 +1,2 @@
+# Tested with Gemini 3.6 Flash through Google Cloud's global endpoint.
+google-genai>=2.17,<3

@@ -89,6 +89,14 @@ python3 ~/.claude/skills/surveylevelup/scripts/extract_fulltext.py
 python3 ~/.claude/skills/surveylevelup/scripts/gate.py --status
 ```
 
+The card runner has optional model dependencies. For Vertex/Gemini:
+
+```bash
+pip install -r ~/.claude/skills/surveylevelup/requirements-vertex.txt
+export GOOGLE_CLOUD_PROJECT="your-project"
+export GOOGLE_CLOUD_LOCATION="global"
+```
+
 Then read [`SKILL.md`](SKILL.md) — it is the operating manual.
 
 ## What the project looks like
@@ -102,8 +110,8 @@ Then read [`SKILL.md`](SKILL.md) — it is the operating manual.
 ├── PROVENANCE.md      which prompt produced which artifact
 ├── STRUCTURE.md       file map: read-only evidence vs writable output
 ├── corpus/        →   a paperlevelup topic folder            [read-only]
-├── inputs/            bib, full text, prompts, cards         [read-only once written]
-├── state/             gate state, counts, optional stances
+├── inputs/            bib, full text, prompts, cards         [producer-owned evidence]
+├── state/             gate state, card assignments, counts, optional stances
 ├── drafts/v1/
 └── archive/           superseded documents live here, not in the root
 ```
@@ -121,10 +129,19 @@ root with a warning label, because that is the same fact living in two places.
 | `build_bib.py` | Corpus sidecar → `references.bib`, plus a gap report that only flags what actually blocks |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md` via PyMuPDF. Ungated |
 | `gate.py` | Report gate readiness; `--open --signed-by` records the crossing |
+| `extract_cards.py` | Run card prompts through `vertex`, `anthropic` or the offline `fake` backend; enforce the gate before writing; stamp and verify provenance |
 | `cards.py` | Validate cards against the field block their prompt declares; `--aggregate` for distributions |
 
-Scripts never write cards — an agent does, by running the prompts. Scripts check
-that what got written matches the declared contract.
+`extract_cards.py` writes cards and checks the same declared contract as
+`cards.py`. A trial run names keys explicitly. A corpus-wide `--all` run requires
+`state/card_assignments.json`, mapping every bib key to a list of applicable card
+types; it never infers paper type from the corpus folders.
+
+```bash
+python3 ~/.claude/skills/surveylevelup/scripts/extract_cards.py \
+  --type method --keys paper2024a,paper2024b \
+  --backend vertex --model gemini-3.6-flash --dry-run
+```
 
 ## Conventions worth knowing before you start
 
@@ -146,9 +163,15 @@ that what got written matches the declared contract.
 ## Tests
 
 ```bash
-tests/smoke.sh ~/Papers/<topic>
+tests/smoke.sh
+python3 tests/test_extract_cards.py
 ```
 
-Runs end to end against a throwaway project: layout, bibliography, gate refusal
-without a signature, rejection of a malformed field block, and card validation
-catching enum, evidence, type and gate-discipline problems.
+These run offline against throwaway projects. The explicit paid integration test
+uses another temporary fixture and is never part of the default suite:
+
+```bash
+SURVEYLEVELUP_LIVE_VERTEX=1 \
+GOOGLE_CLOUD_PROJECT="your-project" GOOGLE_CLOUD_LOCATION=global \
+python3 tests/live_vertex.py gemini-3.6-flash
+```

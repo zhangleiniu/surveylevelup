@@ -1,6 +1,6 @@
 """Google Vertex AI backend — the cheap bulk pass.
 
-    generate(prompt, model, max_tokens=..., timeout=...) -> str
+    generate(prompt, model, max_tokens=..., timeout=...) -> GenerationResult
 
 Credentials and project come from the environment, the way gcloud sets them:
 
@@ -11,12 +11,12 @@ Credentials and project come from the environment, the way gcloud sets them:
 Nothing here reads the key file or prints any of it.
 
 The SDK import is lazy so the rest of the skill runs without `google-genai`
-installed; it is listed as optional in requirements.txt.
+installed; the optional dependency is in requirements-vertex.txt.
 """
 
 import os
 
-from . import BackendError, TransientError
+from . import BackendError, GenerationResult, TransientError
 
 DEFAULT_MAX_TOKENS = 4096
 
@@ -28,7 +28,7 @@ _TRANSIENT_MARKERS = ("429", "500", "502", "503", "504", "resource exhausted",
 
 
 def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
-             timeout: float = 600.0, **opts) -> str:
+             timeout: float = 600.0, **opts) -> GenerationResult:
     try:
         from google import genai
         from google.genai import types
@@ -41,14 +41,20 @@ def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
         raise BackendError("GOOGLE_CLOUD_PROJECT is not set")
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
 
+    client = None
     try:
-        client = genai.Client(vertexai=True, project=project, location=location)
+        client = genai.Client(
+            enterprise=True,
+            project=project,
+            location=location,
+            http_options=types.HttpOptions(
+                api_version="v1", timeout=int(timeout * 1000)),
+        )
         response = client.models.generate_content(
             model=model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 max_output_tokens=max_tokens,
-                http_options=types.HttpOptions(timeout=int(timeout * 1000)),
             ),
         )
     except Exception as exc:
@@ -56,11 +62,35 @@ def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
         if any(m in message.lower() for m in _TRANSIENT_MARKERS):
             raise TransientError(message) from None
         raise BackendError(f"{type(exc).__name__}: {message}") from None
+    finally:
+        if client is not None:
+            client.close()
 
     text = getattr(response, "text", None)
     if not text:
         raise BackendError("Vertex returned no text (blocked, or empty candidate)")
-    return text
+    metadata = {
+        "project": project,
+        "location": location,
+        "sdk_version": getattr(genai, "__version__", "unknown"),
+    }
+    for name in ("response_id", "model_version"):
+        value = getattr(response, name, None)
+        if value:
+            metadata[name] = str(value)
+    usage = getattr(response, "usage_metadata", None)
+    if usage is not None:
+        for output, source in (
+            ("input_tokens", "prompt_token_count"),
+            ("output_tokens", "candidates_token_count"),
+            ("thought_tokens", "thoughts_token_count"),
+            ("cached_input_tokens", "cached_content_token_count"),
+            ("total_tokens", "total_token_count"),
+        ):
+            value = getattr(usage, source, None)
+            if value is not None:
+                metadata[output] = int(value)
+    return GenerationResult(text=text, metadata=metadata)
 
 
 def _brief(exc) -> str:

@@ -2,8 +2,8 @@
 
 Selected with `--backend fake`. It reads nothing from the network and ignores
 the model id beyond recording it, which is the point: the runner's own
-behaviour — provenance stamping, pre-validation, the gate and model-mixing
-refusals, overwrite refusal — is what the tests are about.
+behaviour — provenance stamping, pre-validation, the gate, artifact-cohort and
+overwrite refusals — is what the tests are about.
 
 What it returns is set by the environment, so a test can drive it without the
 runner growing test-only flags:

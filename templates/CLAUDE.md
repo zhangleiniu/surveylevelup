@@ -24,10 +24,12 @@ The skill's own manual is `~/.claude/skills/surveylevelup/SKILL.md`, with
 
 ## Hard rules
 
-- **Never modify anything under `corpus/` or `inputs/`.** PDFs, full text, cards,
-  prompts and metadata are read-only evidence, not scratch space.
-- **Never edit a card.** Cards come only from running the prompts in
-  `inputs/prompts/`. A wrong card is *flagged*, never fixed inline. If prose needs
+- **Never hand-edit evidence.** `corpus/` is read-only. Files under `inputs/` are
+  owned by their named producer scripts; correct the source or producer and
+  re-run it rather than patching generated evidence.
+- **Never edit a card.** Cards come from `extract_cards.py` running the contracts
+  in `inputs/prompts/`. A wrong card is flagged and re-run, never fixed inline;
+  cards of one type do not mix prompt/backend/model cohorts. If prose needs
   something a card lacks, read the full text and mark that the fact came from full
   text — do not write it back into a card.
 - **`not reported` ≠ absent.** It means the paper did not say so.

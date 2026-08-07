@@ -2,12 +2,12 @@
 
 A backend is one module exposing a single function:
 
-    generate(prompt: str, model: str, **opts) -> str
+    generate(prompt: str, model: str, **opts) -> str | GenerationResult
 
-It returns the model's text and nothing else. It never logs credentials and
-never echoes the paper text back out — the prompt it receives carries a whole
-paper, and a traceback that prints it is a leak of the evidence layer into the
-run log.
+It returns model text and may attach non-sensitive response metadata. It never
+logs credentials or echoes the paper text back out — the prompt it receives
+carries a whole paper, and a traceback that prints it is a leak of the evidence
+layer into the run log.
 
 Backends import their SDK lazily, inside the call, so the rest of the skill
 runs on a machine where neither SDK is installed.
@@ -23,6 +23,7 @@ Anything else raised by a backend is treated as permanent.
 import importlib
 import random
 import time
+from dataclasses import dataclass, field
 
 # `fake` is the offline backend the tests inject; it calls nothing.
 KNOWN = ("vertex", "anthropic", "fake")
@@ -36,6 +37,18 @@ class TransientError(BackendError):
     """A backend failure that another attempt might survive."""
 
 
+@dataclass
+class GenerationResult:
+    """Model text plus non-sensitive response metadata.
+
+    Simple backends may still return a string; ``generate`` wraps it. Cloud
+    backends use metadata for token accounting and exact run provenance.
+    """
+
+    text: str
+    metadata: dict = field(default_factory=dict)
+
+
 def load(name: str):
     """Import a backend module by name. Raises KeyError if it is not known."""
     if name not in KNOWN:
@@ -44,7 +57,7 @@ def load(name: str):
 
 
 def generate(backend: str, prompt: str, model: str, attempts: int = 4,
-             base_delay: float = 2.0, sleep=time.sleep, **opts) -> str:
+             base_delay: float = 2.0, sleep=time.sleep, **opts) -> GenerationResult:
     """Call a backend, retrying transient failures with exponential backoff.
 
     Raises BackendError with a message that never contains prompt text.
@@ -53,7 +66,7 @@ def generate(backend: str, prompt: str, model: str, attempts: int = 4,
     last = None
     for attempt in range(1, attempts + 1):
         try:
-            text = module.generate(prompt, model, **opts)
+            result = module.generate(prompt, model, **opts)
         except TransientError as exc:
             last = exc
             if attempt == attempts:
@@ -64,11 +77,16 @@ def generate(backend: str, prompt: str, model: str, attempts: int = 4,
             raise
         except Exception as exc:  # an SDK error we do not recognise
             raise BackendError(f"{type(exc).__name__}: {exc}") from None
-        if not (text or "").strip():
+        if isinstance(result, str):
+            result = GenerationResult(result)
+        if not isinstance(result, GenerationResult):
+            raise BackendError(
+                f"{backend} returned {type(result).__name__}, expected text or GenerationResult")
+        if not (result.text or "").strip():
             last = TransientError("backend returned empty text")
             if attempt == attempts:
                 break
             sleep(base_delay * (2 ** (attempt - 1)))
             continue
-        return text
+        return result
     raise BackendError(f"gave up after {attempts} attempts: {last}")

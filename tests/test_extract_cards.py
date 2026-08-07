@@ -91,6 +91,10 @@ class ProjectCase(unittest.TestCase):
     def card(self, bibkey, card_type="method"):
         return (self.project / "inputs" / "cards" / card_type / f"{bibkey}.md")
 
+    def write_assignments(self, table):
+        (self.project / "state" / "card_assignments.json").write_text(
+            json.dumps(table))
+
 
 class TestProvenance(ProjectCase):
 
@@ -107,6 +111,7 @@ class TestProvenance(ProjectCase):
         self.assertEqual(front["backend"], "fake")
         self.assertEqual(front["prompt"], "method_card.md")
         self.assertEqual(len(front["prompt_sha256"]), 12)
+        self.assertEqual(len(front["fulltext_sha256"]), 12)
         self.assertIn("generated", front)
 
     def test_written_card_passes_cards_py_check(self):
@@ -210,18 +215,37 @@ class TestRefusals(ProjectCase):
         code, out = run(self.project, "--type", "method", "--keys", "otherpaper2024y",
                         "--backend", "fake", "--model", "fake-model-2")
         self.assertEqual(code, 1, out)
-        self.assertEqual(out["refused"], "model_mixing")
+        self.assertEqual(out["refused"], "artifact_cohort_mixing")
         self.assertEqual(out["papers"], ["goodpaper2024x"])
-        self.assertEqual(out["existing_models"], ["fake-model-1"])
+        self.assertIn("model", out["conflicts"]["goodpaper2024x"])
         self.assertFalse(self.card("otherpaper2024y").exists())
 
-    def test_model_mixing_allowed_with_force(self):
+    def test_force_does_not_bypass_model_mixing(self):
         run(self.project, "--type", "method", "--keys", "goodpaper2024x",
             "--backend", "fake", "--model", "fake-model-1")
         code, out = run(self.project, "--type", "method", "--keys", "otherpaper2024y",
                         "--backend", "fake", "--model", "fake-model-2", "--force")
-        self.assertEqual(code, 0, out)
-        self.assertTrue(self.card("otherpaper2024y").exists())
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out["refused"], "artifact_cohort_mixing")
+        self.assertFalse(self.card("otherpaper2024y").exists())
+
+    def test_prompt_mixing_is_refused(self):
+        run(self.project, "--type", "method", "--keys", "goodpaper2024x",
+            "--backend", "fake", "--model", "fake-model-1")
+        prompt = self.project / "inputs" / "prompts" / "method_card.md"
+        prompt.write_text(prompt.read_text() + "\nA clarified instruction.\n")
+        code, out = run(self.project, "--type", "method", "--keys", "otherpaper2024y",
+                        "--backend", "fake", "--model", "fake-model-1")
+        self.assertEqual(code, 1, out)
+        self.assertIn("prompt_sha256", out["conflicts"]["goodpaper2024x"])
+
+    def test_backend_mixing_is_refused_before_backend_import(self):
+        run(self.project, "--type", "method", "--keys", "goodpaper2024x",
+            "--backend", "fake", "--model", "same-model")
+        code, out = run(self.project, "--type", "method", "--keys", "otherpaper2024y",
+                        "--backend", "anthropic", "--model", "same-model")
+        self.assertEqual(code, 1, out)
+        self.assertIn("backend", out["conflicts"]["goodpaper2024x"])
 
     def test_missing_fulltext_is_reported_not_fatal(self):
         code, out = run(self.project, "--type", "method",
@@ -276,6 +300,56 @@ class TestGateClosed(ProjectCase):
         self.assertEqual(code, 1, out)
         self.assertEqual(out["refused"], "gate_violation")
         self.assertFalse(self.card("goodpaper2024x").exists())
+
+
+class TestCardAssignments(ProjectCase):
+
+    def test_all_requires_assignments(self):
+        code, out = run(self.project, "--type", "method", "--all",
+                        "--backend", "fake", "--model", "fake-model-1", "--dry-run")
+        self.assertEqual(code, 1, out)
+        self.assertIn("card_assignments.json is required", out["error"])
+
+    def test_all_selects_explicit_assignments_and_allows_empty_list(self):
+        self.write_assignments({
+            "goodpaper2024x": ["method"],
+            "otherpaper2024y": [],
+        })
+        code, out = run(self.project, "--type", "method", "--all",
+                        "--backend", "fake", "--model", "fake-model-1", "--dry-run")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([x["bibkey"] for x in out["would_write"]],
+                         ["goodpaper2024x"])
+        self.assertEqual(out["selection"]["reviewed_papers"], 2)
+
+    def test_one_paper_may_have_two_card_types(self):
+        (self.project / "inputs" / "prompts" / "benchmark_card.md").write_text(PROMPT)
+        self.write_assignments({
+            "goodpaper2024x": ["method", "benchmark"],
+            "otherpaper2024y": [],
+        })
+        code, out = run(self.project, "--type", "benchmark", "--all",
+                        "--backend", "fake", "--model", "fake-model-1", "--dry-run")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([x["bibkey"] for x in out["would_write"]],
+                         ["goodpaper2024x"])
+
+    def test_incomplete_assignments_fail_closed(self):
+        self.write_assignments({"goodpaper2024x": ["method"]})
+        code, out = run(self.project, "--type", "method", "--all",
+                        "--backend", "fake", "--model", "fake-model-1", "--dry-run")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(out["papers_with_no_assignment"], ["otherpaper2024y"])
+
+    def test_invalid_assignment_is_reported(self):
+        self.write_assignments({
+            "goodpaper2024x": "method",
+            "otherpaper2024y": ["telepathy"],
+        })
+        code, out = run(self.project, "--type", "method", "--all",
+                        "--backend", "fake", "--model", "fake-model-1", "--dry-run")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(out["problems"]), 2, out)
 
 
 class TestVerifyEvidence(ProjectCase):
@@ -395,8 +469,8 @@ class TestBackendRetry(unittest.TestCase):
         os.environ["SURVEYLEVELUP_FAKE_MODE"] = "transient"
         try:
             slept = []
-            text = backends_generate(slept)
-            self.assertIn("approach: graph", text)
+            result = backends_generate(slept)
+            self.assertIn("approach: graph", result.text)
             self.assertEqual(len(slept), 2)     # two backoffs, third attempt won
         finally:
             os.environ.pop("SURVEYLEVELUP_FAKE_MODE", None)

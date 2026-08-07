@@ -6,13 +6,13 @@ makes a card a model-agnostic artifact, and it makes the bulk extraction pass
 runnable on a cheaper backend than the agent driving the survey. This script is
 what makes that possible without losing track of who produced what.
 
-Every card it writes records the prompt's digest and the exact model id.
-**Cards produced by two models are two different artifacts**, exactly as cards
-produced by two prompt versions are, so the runner refuses to mix models within
-one card type.
+Every card it writes records the prompt's digest and the exact backend and model.
+Cards produced by different prompts, backends or models are different artifact
+cohorts, so the runner refuses to mix them within one card type.
 
-Nothing here edits a card that already exists. A wrong card is flagged, never
-fixed: --verify-evidence reports, and stops.
+By default an existing card is skipped. ``--force`` may replace it only by
+re-running the same prompt/backend/model cohort; cards are never hand-edited.
+``--verify-evidence`` only reports and never changes a card.
 
 Usage:
     python extract_cards.py --type method --keys gasse2019exact,ibarz2022generalist \\
@@ -84,6 +84,10 @@ def prompt_path(project: Path, card_type: str) -> Path:
 
 
 def prompt_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def content_digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
@@ -159,14 +163,18 @@ def render_card(front: dict, body: str) -> str:
 # model identity across the cards already on disk
 # --------------------------------------------------------------------------
 
-def existing_models(project: Path, card_type: str) -> dict:
-    """{bibkey: model} for cards of this type that record one."""
+COHORT_FIELDS = ("prompt_sha256", "backend", "model")
+
+
+def existing_cohorts(project: Path, card_type: str) -> dict:
+    """{bibkey: {prompt_sha256, backend, model}} for existing cards."""
     directory = project / "inputs" / "cards" / card_type
     out = {}
     if not directory.is_dir():
         return out
     for path in sorted(directory.glob("*.md")):
-        out[path.stem] = parse_card(read_text(path))["front"].get("model")
+        front = parse_card(read_text(path))["front"]
+        out[path.stem] = {name: front.get(name) for name in COHORT_FIELDS}
     return out
 
 
@@ -281,7 +289,7 @@ def verify_type(project: Path, card_type: str, fields: list, keys=None) -> list:
 # key resolution
 # --------------------------------------------------------------------------
 
-PAPER_TYPES = "state/paper_types.json"
+CARD_ASSIGNMENTS = "state/card_assignments.json"
 
 
 def split_keys(raw) -> list:
@@ -291,30 +299,54 @@ def split_keys(raw) -> list:
     return list(dict.fromkeys(out))
 
 
-def all_keys_for(project: Path, card_type: str) -> tuple:
-    """Every key of this type, and a note on how 'this type' was decided.
+def all_keys_for(project: Path, card_type: str, known_types) -> tuple:
+    """Every explicitly assigned key of this type.
 
-    The project records no paper -> card-type assignment anywhere, so --all
-    falls back to every paper with full text unless state/paper_types.json maps
-    bib keys to types.
+    The file maps each bib key to a list because one paper may carry two cards.
+    Missing assignments are unresolved domain judgments, so --all fails closed.
     """
-    mapping = project / PAPER_TYPES
+    mapping = project / CARD_ASSIGNMENTS
     directory = project / "inputs" / "fulltext"
     have = sorted(p.stem for p in directory.glob("*.md")) if directory.is_dir() else []
-    if mapping.is_file():
-        try:
-            table = json.loads(read_text(mapping))
-        except ValueError as exc:
-            die(f"{PAPER_TYPES} does not parse", detail=str(exc))
-        keys = [k for k in have if table.get(k) == card_type]
-        unlisted = [k for k in have if k not in table]
-        return keys, {"source": PAPER_TYPES, "papers_with_no_type_recorded": unlisted}
-    return have, {
-        "source": "every paper with full text",
-        "caveat": f"no {PAPER_TYPES} exists, so --all cannot tell one paper type "
-                  f"from another; it selected every paper with extracted full "
-                  f"text. Write {PAPER_TYPES} as {{bibkey: card_type}} to narrow it.",
-    }
+    if not mapping.is_file():
+        die(f"{CARD_ASSIGNMENTS} is required for --all",
+            why="paper type is a domain judgment and one paper may have more than one card",
+            format={"bibkey": ["method", "benchmark"],
+                    "reviewed-with-no-card": []})
+    try:
+        table = json.loads(read_text(mapping))
+    except ValueError as exc:
+        die(f"{CARD_ASSIGNMENTS} does not parse", detail=str(exc))
+    if not isinstance(table, dict):
+        die(f"{CARD_ASSIGNMENTS} must be a JSON object",
+            format={"bibkey": ["method", "benchmark"]})
+
+    problems = []
+    known = set(known_types)
+    for bibkey, values in table.items():
+        if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+            problems.append({"bibkey": bibkey, "problem": "expected a list of card types"})
+            continue
+        duplicates = sorted({v for v in values if values.count(v) > 1})
+        unknown = sorted(set(values) - known)
+        if duplicates:
+            problems.append({"bibkey": bibkey, "problem": "duplicate card types",
+                             "values": duplicates})
+        if unknown:
+            problems.append({"bibkey": bibkey, "problem": "unknown card types",
+                             "values": unknown, "known_types": sorted(known)})
+    unlisted = sorted(set(have) - set(table))
+    unknown_keys = sorted(set(table) - set(have))
+    if unlisted or unknown_keys or problems:
+        die(f"{CARD_ASSIGNMENTS} is incomplete or invalid",
+            papers_with_no_assignment=unlisted,
+            assignments_without_fulltext=unknown_keys,
+            problems=problems,
+            note="an empty list means the paper was reviewed and needs no card")
+    keys = [k for k in have if card_type in table[k]]
+    return keys, {"source": CARD_ASSIGNMENTS,
+                  "assigned_papers": len(keys),
+                  "reviewed_papers": len(table)}
 
 
 # --------------------------------------------------------------------------
@@ -337,7 +369,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="report the plan and the token estimate; call no backend")
     parser.add_argument("--force", action="store_true",
-                        help="overwrite existing cards, and allow a second model")
+                        help="re-run and replace an existing card in the same artifact cohort")
     parser.add_argument("--verify-evidence", action="store_true",
                         help="check every quoted _evidence span against full text")
     parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS,
@@ -414,7 +446,7 @@ def run_extract(project: Path, prompts: dict, args) -> None:
 
     selection_note = None
     if args.all:
-        keys, selection_note = all_keys_for(project, card_type)
+        keys, selection_note = all_keys_for(project, card_type, prompts)
     else:
         keys = split_keys(args.keys)
     if not keys:
@@ -444,22 +476,37 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             })
             raise SystemExit(1)
 
-    # Model identity. Two models means two artifacts, and a field column half
-    # filled by each is not comparable.
-    known = existing_models(project, card_type)
-    conflicting = sorted(k for k, m in known.items() if m and m != args.model)
-    no_provenance = sorted(k for k, m in known.items() if not m)
-    if conflicting and not args.force:
+    # Artifact identity. A field column extracted by different prompts, backends
+    # or models is heterogeneous even if every individual card validates.
+    requested_cohort = {
+        "prompt_sha256": digest,
+        "backend": args.backend,
+        "model": args.model,
+    }
+    known = existing_cohorts(project, card_type)
+    conflicting = {}
+    no_provenance = []
+    for bibkey, cohort in known.items():
+        missing = [name for name in COHORT_FIELDS if not cohort.get(name)]
+        if missing:
+            no_provenance.append({"bibkey": bibkey, "missing": missing})
+        mismatch = {name: {"existing": cohort.get(name),
+                           "requested": requested_cohort[name]}
+                    for name in COHORT_FIELDS
+                    if cohort.get(name) and cohort[name] != requested_cohort[name]}
+        if mismatch:
+            conflicting[bibkey] = mismatch
+    if conflicting:
         print_json({
-            "refused": "model_mixing",
+            "refused": "artifact_cohort_mixing",
             "card_type": card_type,
-            "problem": f"cards of this type already exist from a different model; "
-                       f"this run would produce {args.model!r}",
-            "existing_models": sorted({known[k] for k in conflicting}),
-            "papers": conflicting,
-            "fix": ["re-extract those cards with the same model",
-                    "or move them aside and re-extract the type",
-                    "or --force, and record the split in PROVENANCE.md"],
+            "problem": "cards of this type already exist from a different prompt, "
+                       "backend or model",
+            "requested_cohort": requested_cohort,
+            "conflicts": conflicting,
+            "papers": sorted(conflicting),
+            "fix": ["use the same prompt, backend and model",
+                    "or archive the existing cohort and re-extract the whole type"],
             "note": "no card was written",
         })
         raise SystemExit(1)
@@ -477,11 +524,12 @@ def run_extract(project: Path, prompts: dict, args) -> None:
         if target.exists() and not args.force:
             skipped.append({"bibkey": bibkey, "status": "exists",
                             "path": str(target),
-                            "fix": "--force to overwrite; cards are evidence, and "
-                                   "the project's rule is flag, never fix"})
+                            "fix": "--force re-runs the producer in the same "
+                                   "prompt/backend/model cohort; never edit by hand"})
             continue
 
         paper = read_text(source)
+        fulltext_digest = content_digest(paper)
         truncated = len(paper) > args.max_chars
         if truncated:
             paper = paper[:args.max_chars]
@@ -497,7 +545,7 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             continue
 
         try:
-            answer = backends.generate(
+            result = backends.generate(
                 args.backend, request, args.model,
                 attempts=args.attempts, max_tokens=args.max_output_tokens)
         except backends.BackendError as exc:
@@ -513,8 +561,23 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             "model": args.model,
             "backend": args.backend,
             "generated": now_iso(),
+            "fulltext_sha256": fulltext_digest,
         }
-        body = clean_response(answer)
+        metadata = dict(result.metadata)
+        for source_name, front_name in (
+            ("project", "backend_project"),
+            ("location", "backend_location"),
+            ("sdk_version", "sdk_version"),
+            ("model_version", "model_version"),
+            ("input_tokens", "input_tokens"),
+            ("output_tokens", "output_tokens"),
+            ("thought_tokens", "thought_tokens"),
+            ("cached_input_tokens", "cached_input_tokens"),
+            ("total_tokens", "total_tokens"),
+        ):
+            if source_name in metadata:
+                front[front_name] = metadata[source_name]
+        body = clean_response(result.text)
         card = render_card(front, body)
 
         # The same rules cards.py --check applies, before the file lands.
@@ -525,6 +588,11 @@ def run_extract(project: Path, prompts: dict, args) -> None:
         target.write_text(card, encoding="utf-8")
         record = {"bibkey": bibkey, "path": str(target),
                   "input_tokens_estimate": estimate}
+        usage = {name: metadata[name] for name in (
+            "input_tokens", "output_tokens", "thought_tokens",
+            "cached_input_tokens", "total_tokens") if name in metadata}
+        if usage:
+            record["usage"] = usage
         if truncated:
             record["truncated"] = True
         if problems:
@@ -546,12 +614,17 @@ def run_extract(project: Path, prompts: dict, args) -> None:
     }
     if selection_note:
         payload["selection"] = selection_note
+    completed = written + invalid
+    usage_totals = {}
+    for record in completed:
+        for name, value in record.get("usage", {}).items():
+            usage_totals[name] = usage_totals.get(name, 0) + value
+    if usage_totals:
+        payload["usage"] = usage_totals
     if no_provenance:
-        payload["cards_without_model_provenance"] = {
-            "papers": no_provenance,
-            "note": "these carry no model in their front matter, so the "
-                    "mixing check cannot see them. They were written by hand or "
-                    "by an agent; record which model in PROVENANCE.md.",
+        payload["cards_without_complete_provenance"] = {
+            "cards": no_provenance,
+            "note": "the cohort check can compare only the provenance these cards carry",
         }
     if args.dry_run:
         payload["would_write"] = planned
@@ -573,7 +646,7 @@ def run_extract(project: Path, prompts: dict, args) -> None:
     progress.log("extract_cards", card_type=card_type, backend=args.backend,
                  model=args.model, prompt_sha256=digest,
                  written=len(written), invalid=len(invalid),
-                 failed=len(failed), skipped=len(skipped))
+                 failed=len(failed), skipped=len(skipped), usage=usage_totals)
     progress.save()
     print_json(payload)
     if failed:

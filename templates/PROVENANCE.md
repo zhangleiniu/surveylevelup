@@ -51,13 +51,15 @@ Every round of corpus growth, so a later reader knows the corpus was not static.
 
 ## Prompts and cards
 
-| Prompt | Version / date | Applies to | Cards produced |
-|---|---|---|---|
-| _none_ | | | |
+| Prompt | SHA | Backend / exact model | Applies to | Cards produced |
+|---|---|---|---|---|
+| _none_ | | | | |
 
 Record here whenever a prompt changes, because every card produced by the old
 version is now a different artifact from the ones produced after. Cards are never
-edited to catch up; they are re-run or marked stale.
+edited to catch up; they are re-run or marked stale. Do not mix prompt, backend or
+model cohorts within one card type. Generated card front matter carries the
+per-artifact provenance; this table records the cohort and its scope.
 
 ## Cards flagged as wrong
 

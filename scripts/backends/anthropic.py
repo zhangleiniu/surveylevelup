@@ -6,9 +6,8 @@ The model id is passed through verbatim; this module never picks one. A card
 is a model-identified artifact, so the caller must say which model produced it
 and `extract_cards.py` records that id in the card's front matter.
 
-Credentials come from the environment (`ANTHROPIC_API_KEY`, or an `ant auth
-login` profile — the SDK's own resolution order). They are never read here and
-never logged.
+Credentials come from the environment (`ANTHROPIC_API_KEY`) through the SDK.
+They are never read here and never logged.
 
 The SDK import is lazy so the rest of the skill runs without it installed.
 """

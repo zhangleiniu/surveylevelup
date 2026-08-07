@@ -181,11 +181,12 @@ ok "runner refuses to overwrite without --force"
 
 if python3 "$S/extract_cards.py" --project "$WORK" --type method \
      --keys trial2024b --backend fake --model smoke-model-2 --force \
-     >/dev/null 2>&1; then :; else fail "--force did not allow a second model"; fi
+     >/dev/null 2>&1; then fail "--force bypassed the artifact cohort check"; fi
 OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
   --keys trial2024a --backend fake --model smoke-model-3 2>/dev/null || true)"
-echo "$OUT" | grep -q '"refused": "model_mixing"' || fail "model mixing not refused"
-ok "runner refuses to mix models within one card type"
+echo "$OUT" | grep -q '"refused": "artifact_cohort_mixing"' \
+  || fail "model mixing not refused"
+ok "runner refuses to mix artifact cohorts within one card type"
 
 SURVEYLEVELUP_FAKE_MODE=bad_enum python3 "$S/extract_cards.py" --project "$WORK" \
   --type method --keys trial2024a --backend fake --model smoke-model-1 --force \

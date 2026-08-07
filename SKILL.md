@@ -60,6 +60,7 @@ Every script prints JSON.
 | `gate.py` | Report gate readiness; `--open` records the crossing once criteria and signature are in |
 | `build_bib.py` | `papers.jsonl` → `inputs/references.bib` plus a blocking-gap report |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md`. Ungated |
+| `extract_cards.py` | Run a type-specific card prompt with a declared backend/model; enforce the gate before calling it; stamp provenance; `--verify-evidence` checks quoted spans against full text |
 | `cards.py` | `--check` validates cards against the field block their prompt declares, and reports cards written outside the trial set while the gate is closed; `--aggregate` dumps field distributions |
 
 ---
@@ -75,13 +76,14 @@ Every script prints JSON.
 ├── PROVENANCE.md          which prompt produced which artifact
 ├── STRUCTURE.md           file map: read-only vs writable
 ├── corpus/            →   symlink to the paperlevelup topic dir   [READ-ONLY]
-├── inputs/                                                        [READ-ONLY once written]
+├── inputs/                                           [producer-owned; never hand-edit]
 │   ├── references.bib
 │   ├── fulltext/<bibkey>.md
 │   ├── prompts/<type>_card.md          method_card.md, benchmark_card.md, …
 │   └── cards/<type>/<bibkey>.md
 ├── state/
 │   ├── progress.json      gate state, signatures, counts
+│   ├── card_assignments.json   optional until `--all`; bibkey → applicable card types
 │   ├── friction.md        where this skill got in the way — append in the moment
 │   └── stances.jsonl      optional; see below
 ├── drafts/v1/
@@ -257,9 +259,9 @@ On the schema itself, see `references/schema-design.md`. The three standing rule
 - **By signature** — `--signed-by` is the expert's, not the agent's. Without it
   the gate does not open, however green the checks are.
 
-The skill cannot stop an agent from writing cards early, so it makes doing so
-visible instead: while the gate is closed, `cards.py --check` reports every card
-written for a paper outside the nominated trial set as a `gate_violation`.
+`extract_cards.py` enforces this before it calls a model or writes anything: while
+the gate is closed, only nominated trial papers may run. `cards.py --check` still
+reports cards written outside the trial set by any other route.
 
 Crossing is not irreversible. Cards frequently reveal the axis was wrong; re-cutting
 it and re-extracting is sometimes the right call. Log it in `DECISIONS.md`, note
@@ -268,8 +270,21 @@ which cards are superseded, and cross again. What the gate prevents is doing tha
 
 ### Extraction and drafting
 
-Run the prompts to produce cards, then `cards.py` to validate. Record every
-prompt-to-artifact edge in `PROVENANCE.md`.
+Run `extract_cards.py --keys ...` on the trial papers, then `cards.py --check` and
+`extract_cards.py --verify-evidence`. The prompt is a self-contained contract, so
+the bulk pass may use a cheaper backend than the agent writing the survey without
+changing the card format. Every generated card records the prompt digest, backend
+and exact model; cards of one type must not mix those artifact cohorts.
+
+For a corpus-wide `--all` run, write `state/card_assignments.json` as
+`{"bibkey": ["method", "benchmark"]}`. A paper may have two cards; an empty list
+means it was reviewed and needs none. Missing assignments are unresolved domain
+judgments, so `--all` refuses to guess from the corpus folders.
+
+Evidence verification reports an exact or punctuation-only match as `verified`.
+`near_match` is deliberately unresolved: PDF extraction damage can cause it, and
+so can a reconstructed quote. It is always flagged for a person to check against
+the PDF. Record each extraction cohort in `PROVENANCE.md`.
 
 **Read the prompts before reading the cards.** They carry the field semantics,
 the enum vocabularies, and the blind spots — above all that `not reported` means
@@ -299,10 +314,10 @@ Six. Not more. Each says at the top what does **not** belong in it.
 | `PROVENANCE.md` | Which prompt consumed and produced each artifact | Conclusions |
 | `STRUCTURE.md` | File map, read-only vs writable, naming | Anything that changes weekly |
 
-**A superseded document is moved to `archive/`, not kept in the root with a
-warning label.** A frozen outline that everyone must be told to ignore is the
-same fact living in two places, which is the failure mode this whole scheme
-exists to prevent.
+**A superseded document or removed evidence is moved to `archive/`, not left in a
+temporary path or kept in the root with a warning label.** A frozen outline that
+everyone must be told to ignore is the same fact living in two places, which is
+the failure mode this whole scheme exists to prevent.
 
 There is no `CHANGES.md`. `git diff` is the change log; `DECISIONS.md` is why.
 
@@ -316,7 +331,9 @@ There is no `CHANGES.md`. `git diff` is the change log; `DECISIONS.md` is why.
   grows, and then the number either stops sorting meaningfully or gets reassigned
   and breaks every reference already written.
 - **Never edit a card. Flag, don't fix.** A wrong card is corrected by re-running
-  its prompt or by the expert. Inline edits contaminate evidence with analysis.
+  its prompt (the runner's `--force` repeats the producer only within the same
+  prompt/backend/model cohort) or by the expert. Inline edits contaminate
+  evidence with analysis.
 - **Traceback is allowed; sedimentation is not.** If prose needs something a card
   lacks, read the full text and mark that the fact came from full text — do not
   write it back into the card.
@@ -353,10 +370,10 @@ it, a step that cost far more than it should have. Date, what happened, what
 would have helped.
 
 Do it in the moment. Friction is obvious while you are stuck in it and nearly
-invisible a week later, and a session transcript is a poor substitute — by the
-time anyone reads one, the thing that was annoying has been smoothed over and
-forgotten. This file is the first-hand record that improves the skill for the
-next project.
+invisible a week later, and a session transcript is a poor substitute. Friction
+is evidence for reviewing the skill, not a backlog to implement literally: a
+review may correct or delete a rule, clarify it, decline a project-specific
+suggestion, or add a small guard when the failure is general and reproducible.
 
 ## Optional: `state/stances.jsonl`
 
