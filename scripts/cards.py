@@ -15,10 +15,8 @@ import argparse
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from common import (Progress, add_project_arg, die, find_project, load_prompts,
-                    parse_card, print_json)
-
-ABSENT = {"", "n/a", "na", "none", "not reported", "not applicable", "-", "--"}
+from common import (ABSENT, Progress, add_project_arg, card_problems, die,  # noqa: F401
+                    find_project, load_prompts, parse_card, print_json)
 
 
 def card_files(project: Path) -> dict:
@@ -34,41 +32,10 @@ def card_files(project: Path) -> dict:
 
 
 def check_card(path: Path, fields: list) -> list:
-    parsed = parse_card(path.read_text())
-    values = {**parsed["front"], **parsed["body"]}
-    problems = []
-    for spec in fields:
-        name = spec["name"]
-        raw = values.get(name)
-        present = raw is not None and raw.strip().lower() not in ABSENT
-        if spec["required"] and raw is None:
-            problems.append({"field": name, "problem": "required field absent"})
-            continue
-        if raw is None:
-            continue
-        value = raw.strip()
-        if spec["kind"] == "enum" and present:
-            # a free-text escape hatch is allowed but must be declared inline
-            if value not in spec["values"] and not value.upper().startswith("FREE TEXT"):
-                problems.append({"field": name, "problem": "value outside the declared enum",
-                                 "value": value[:60], "allowed": spec["values"]})
-        if spec["kind"] == "int" and present and not value.lstrip("-").isdigit():
-            problems.append({"field": name, "problem": "not an integer", "value": value[:40]})
-        if spec["evidence"] and present:
-            ev = values.get(f"{name}_evidence")
-            if ev is None or ev.strip().lower() in ABSENT:
-                problems.append({"field": name,
-                                 "problem": "judgment-bearing field without _evidence"})
-            elif '"' not in ev and "'" not in ev:
-                problems.append({"field": name,
-                                 "problem": "_evidence carries no quoted span"})
-    declared = {s["name"] for s in fields}
-    allowed = declared | {f"{n}_evidence" for n in declared} | {
-        "bib_key", "bibkey", "title", "venue", "year", "card", "prompt"}
-    for name in values:
-        if name not in allowed and not name.endswith("_note"):
-            problems.append({"field": name, "problem": "field not declared by the prompt"})
-    return problems
+    """The rules live in common.card_problems — extract_cards.py applies the
+    same ones before it writes, so a written card and a checked card agree."""
+    parsed = parse_card(path.read_text(errors="ignore"))
+    return card_problems({**parsed["front"], **parsed["body"]}, fields)
 
 
 def main():

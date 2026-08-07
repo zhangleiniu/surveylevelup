@@ -253,3 +253,68 @@ def parse_card(text: str) -> dict:
         if hit:
             body[hit.group(1)] = hit.group(2).strip()
     return {"front": front, "body": body}
+
+
+# --------------------------------------------------------------------------
+# card validation
+# --------------------------------------------------------------------------
+#
+# One implementation, used both by cards.py --check (after the fact) and by
+# extract_cards.py (before writing). If these two ever disagree the runner
+# writes cards that the checker rejects, so they share this function rather
+# than each carrying their own copy of the rules.
+
+# A value that means "no answer", however the card writer spelled it.
+ABSENT = {"", "n/a", "na", "none", "not reported", "not applicable", "-", "--"}
+
+# Front matter a card may carry beyond the fields its prompt declares:
+# identity, and the provenance extract_cards.py stamps on every card it writes.
+PROVENANCE_FRONT_MATTER = frozenset({
+    "bib_key", "bibkey", "title", "venue", "year", "card", "card_type",
+    "prompt", "prompt_sha256", "model", "backend", "generated",
+})
+
+
+def is_present(raw) -> bool:
+    """A field is present if it exists and does not say 'no answer'."""
+    return raw is not None and raw.strip().lower() not in ABSENT
+
+
+def card_problems(values: dict, fields: list) -> list:
+    """Check a card's flattened {field: value} map against its prompt's specs.
+
+    `values` is `{**parsed['front'], **parsed['body']}`. Returns a list of
+    {"field", "problem", ...}; empty means the card honours its contract.
+    """
+    problems = []
+    for spec in fields:
+        name = spec["name"]
+        raw = values.get(name)
+        present = is_present(raw)
+        if spec["required"] and raw is None:
+            problems.append({"field": name, "problem": "required field absent"})
+            continue
+        if raw is None:
+            continue
+        value = raw.strip()
+        if spec["kind"] == "enum" and present:
+            # a free-text escape hatch is allowed but must be declared inline
+            if value not in spec["values"] and not value.upper().startswith("FREE TEXT"):
+                problems.append({"field": name, "problem": "value outside the declared enum",
+                                 "value": value[:60], "allowed": spec["values"]})
+        if spec["kind"] == "int" and present and not value.lstrip("-").isdigit():
+            problems.append({"field": name, "problem": "not an integer", "value": value[:40]})
+        if spec["evidence"] and present:
+            ev = values.get(f"{name}_evidence")
+            if ev is None or ev.strip().lower() in ABSENT:
+                problems.append({"field": name,
+                                 "problem": "judgment-bearing field without _evidence"})
+            elif '"' not in ev and "'" not in ev:
+                problems.append({"field": name,
+                                 "problem": "_evidence carries no quoted span"})
+    declared = {s["name"] for s in fields}
+    allowed = declared | {f"{n}_evidence" for n in declared} | PROVENANCE_FRONT_MATTER
+    for name in values:
+        if name not in allowed and not name.endswith("_note"):
+            problems.append({"field": name, "problem": "field not declared by the prompt"})
+    return problems

@@ -1,1 +1,9 @@
 pymupdf
+
+# optional — only the backend you actually run needs its SDK.
+# extract_cards.py --backend vertex
+#   google-genai
+# extract_cards.py --backend anthropic
+#   anthropic
+# Both are imported lazily, inside the call, so the rest of the skill runs
+# without either installed. --backend fake needs nothing.

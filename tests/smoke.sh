@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
 # End-to-end smoke test against a throwaway project.
 #
-#   tests/smoke.sh <a paperlevelup topic dir> [workdir]
+#   tests/smoke.sh [a paperlevelup topic dir] [workdir]
+#
+# With no corpus argument it builds a fixture one, so the whole suite runs
+# offline against nothing real.
 #
 # Verifies: init lays out the project; build_bib produces entries; the corpus
 # portrait runs; the gate reports closed and refuses to open unsigned; a bad
 # prompt field block is
 # rejected; a good one parses; card validation catches a bogus enum value and
-# flags cards written outside the trial set while the gate is closed.
+# flags cards written outside the trial set while the gate is closed; and the
+# card runner stamps provenance, honours the gate, refuses to mix models,
+# refuses to overwrite, and checks quoted evidence against full text.
 
 set -euo pipefail
 
-CORPUS="${1:?usage: smoke.sh <paperlevelup topic dir> [workdir]}"
-WORK="${2:-$(mktemp -d)}/smoke-project"
-S="$(cd "$(dirname "$0")/../scripts" && pwd)"
+T="$(cd "$(dirname "$0")" && pwd)"
+S="$(cd "$T/.." && pwd)/scripts"
+ROOT="${2:-$(mktemp -d)}"
+WORK="$ROOT/smoke-project"
+if [ -n "${1:-}" ]; then
+  CORPUS="$1"
+else
+  CORPUS="$ROOT/fixture-corpus"
+  python3 "$T/make_fixture_corpus.py" "$CORPUS" >/dev/null
+fi
 ok() { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; exit 1; }
 
@@ -111,5 +123,97 @@ ok "gate violation detected"
 python3 "$S/cards.py" --project "$WORK" --aggregate | grep -q '"approach"' \
   || fail "aggregate produced no distribution"
 ok "aggregate works"
+
+# --------------------------------------------------------------------------
+# the card runner
+# --------------------------------------------------------------------------
+# Everything below uses --backend fake, so nothing reaches a network. The
+# canned answers live in scripts/backends/fake.py.
+
+rm -f "$WORK/inputs/cards/method/"*.md
+
+mkdir -p "$WORK/inputs/fulltext"
+for KEY in trial2024a trial2024b outside2024c; do
+  cat > "$WORK/inputs/fulltext/$KEY.md" <<'PAPER'
+# A Paper About Routing
+
+We route messages along the instance graph, then decode a solution.
+The encoder runs for two stages.
+PAPER
+done
+python3 "$S/gate.py" --project "$WORK" --trial trial2024a trial2024b >/dev/null
+
+OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
+  --keys trial2024a --backend fake --model smoke-model-1 --dry-run)"
+echo "$OUT" | grep -q '"dry_run": true' || fail "dry run not reported as such"
+echo "$OUT" | grep -q '"input_tokens_estimate_total"' || fail "no token estimate"
+echo "$OUT" | grep -q '"model": "smoke-model-1"' || fail "dry run hid the model"
+if [ -f "$WORK/inputs/cards/method/trial2024a.md" ]; then fail "dry run wrote a card"; fi
+ok "dry run reports the plan and writes nothing"
+
+if python3 "$S/extract_cards.py" --project "$WORK" --type method \
+     --keys outside2024c --backend fake --model smoke-model-1 >/dev/null 2>&1; then
+  fail "extracted a paper outside the trial set while the gate was closed"
+fi
+OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
+  --keys outside2024c --backend fake --model smoke-model-1 2>/dev/null || true)"
+echo "$OUT" | grep -q '"refused": "gate_violation"' || fail "gate refusal not reported"
+if [ -f "$WORK/inputs/cards/method/outside2024c.md" ]; then fail "gate-violating card written"; fi
+ok "runner refuses to write past a closed gate"
+
+OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
+  --keys trial2024a,trial2024b --backend fake --model smoke-model-1)"
+echo "$OUT" | grep -q '"invalid": \[\]' || fail "the canned card did not validate"
+grep -q '^model: smoke-model-1$' "$WORK/inputs/cards/method/trial2024a.md" \
+  || fail "card front matter records no model"
+grep -q '^prompt_sha256: ' "$WORK/inputs/cards/method/trial2024a.md" \
+  || fail "card front matter records no prompt digest"
+ok "runner writes cards stamped with model and prompt digest"
+
+python3 "$S/cards.py" --project "$WORK" --check | grep -q '"cards_clean": 2' \
+  || fail "cards.py rejected what the runner wrote"
+ok "written cards pass cards.py --check"
+
+OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
+  --keys trial2024a --backend fake --model smoke-model-1)"
+echo "$OUT" | grep -q '"status": "exists"' || fail "overwrote an existing card"
+ok "runner refuses to overwrite without --force"
+
+if python3 "$S/extract_cards.py" --project "$WORK" --type method \
+     --keys trial2024b --backend fake --model smoke-model-2 --force \
+     >/dev/null 2>&1; then :; else fail "--force did not allow a second model"; fi
+OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --type method \
+  --keys trial2024a --backend fake --model smoke-model-3 2>/dev/null || true)"
+echo "$OUT" | grep -q '"refused": "model_mixing"' || fail "model mixing not refused"
+ok "runner refuses to mix models within one card type"
+
+SURVEYLEVELUP_FAKE_MODE=bad_enum python3 "$S/extract_cards.py" --project "$WORK" \
+  --type method --keys trial2024a --backend fake --model smoke-model-1 --force \
+  | grep -q 'outside the declared enum' || fail "pre-validation missed a bad enum"
+ok "pre-validation reports an invalid card instead of retrying it"
+
+SURVEYLEVELUP_FAKE_MODE=free_text python3 "$S/extract_cards.py" --project "$WORK" \
+  --type method --keys trial2024a --backend fake --model smoke-model-1 --force \
+  | grep -q '"invalid": \[\]' || fail "the FREE TEXT escape hatch was rejected"
+ok "pre-validation accepts the FREE TEXT escape hatch"
+
+OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --verify-evidence --type method)"
+echo "$OUT" | grep -q '"verified": 2' || fail "a real quote did not verify"
+ok "verify-evidence finds quotes that are in the full text"
+
+python3 - "$WORK" <<'PY'
+import sys, pathlib
+card = pathlib.Path(sys.argv[1]) / "inputs/cards/method/trial2024b.md"
+text = card.read_text()
+card.write_text(text.replace('"we route messages along the instance graph"',
+                             '"we solve the whole thing with one transformer"'))
+PY
+python3 "$S/extract_cards.py" --project "$WORK" --verify-evidence --type method \
+  | grep -q '"status": "not_found"' || fail "a fabricated quote was not flagged"
+ok "verify-evidence flags a quote that is not in the full text"
+
+python3 "$T/test_extract_cards.py" 2>&1 | tail -1 | grep -q '^OK' \
+  || fail "extract_cards unit tests failed (run tests/test_extract_cards.py)"
+ok "extract_cards unit tests pass"
 
 echo "all smoke checks passed"
