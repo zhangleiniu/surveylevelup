@@ -18,7 +18,10 @@ import os
 
 from . import BackendError, GenerationResult, TransientError
 
-DEFAULT_MAX_TOKENS = 4096
+# Gemini reasoning tokens share the output budget with the visible answer. Card
+# extraction should not starve the answer merely to save a few tokens; the API
+# bills actual usage, not this ceiling. Gemini 3.6 Flash accepts 65,536.
+DEFAULT_MAX_TOKENS = 65_536
 
 # Vertex reports transient conditions as message text on a generic exception
 # more often than as a typed error, so match on the text as well.
@@ -66,9 +69,6 @@ def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
         if client is not None:
             client.close()
 
-    text = getattr(response, "text", None)
-    if not text:
-        raise BackendError("Vertex returned no text (blocked, or empty candidate)")
     metadata = {
         "project": project,
         "location": location,
@@ -90,7 +90,44 @@ def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,
             value = getattr(usage, source, None)
             if value is not None:
                 metadata[output] = int(value)
+    finish_reason = _finish_reason(response)
+    if finish_reason:
+        metadata["finish_reason"] = finish_reason
+    _check_finish_reason(finish_reason, max_tokens, metadata)
+
+    text = getattr(response, "text", None)
+    if not text:
+        raise BackendError("Vertex returned no text (blocked, or empty candidate)")
     return GenerationResult(text=text, metadata=metadata)
+
+
+def _check_finish_reason(finish_reason: str | None, max_tokens: int,
+                         metadata: dict) -> None:
+    """Reject incomplete or blocked candidates before their text can be used."""
+    if finish_reason == "MAX_TOKENS":
+        detail = ", ".join(
+            f"{name}={metadata[name]}" for name in
+            ("thought_tokens", "output_tokens") if name in metadata)
+        suffix = f", {detail}" if detail else ""
+        raise BackendError(
+            f"Vertex stopped at MAX_TOKENS (max_output_tokens={max_tokens}{suffix}); "
+            "no card was written. Raise --max-output-tokens if the model allows it, "
+            "or shorten the input.")
+    if finish_reason not in (None, "STOP", "FINISH_REASON_UNSPECIFIED"):
+        raise BackendError(
+            f"Vertex stopped with finish_reason={finish_reason}; no card was written")
+
+
+def _finish_reason(response) -> str | None:
+    """Return the first candidate's finish reason without importing SDK types."""
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return None
+    reason = getattr(candidates[0], "finish_reason", None)
+    if reason is None:
+        return None
+    value = getattr(reason, "value", None) or getattr(reason, "name", None)
+    return str(value or reason).rsplit(".", 1)[-1]
 
 
 def _brief(exc) -> str:

@@ -273,8 +273,9 @@ PROVENANCE_FRONT_MATTER = frozenset({
     "bib_key", "bibkey", "title", "venue", "year", "card", "card_type",
     "prompt", "prompt_sha256", "model", "model_version", "backend", "generated",
     "fulltext_sha256", "backend_project", "backend_location", "sdk_version",
+    "finish_reason",
     "input_tokens", "output_tokens", "thought_tokens", "cached_input_tokens",
-    "total_tokens",
+    "total_tokens", "max_output_tokens",
 })
 
 

@@ -14,9 +14,10 @@ The SDK import is lazy so the rest of the skill runs without it installed.
 
 from . import BackendError, TransientError
 
-# A card is short; the prompt is long. Streaming keeps a long request from
-# hitting the SDK's HTTP timeout.
-DEFAULT_MAX_TOKENS = 4096
+# A card is short; the prompt is long, and reasoning models may spend much of
+# the output budget before emitting the card. This is a ceiling, not prepaid
+# usage. Streaming keeps a long request from hitting the SDK's HTTP timeout.
+DEFAULT_MAX_TOKENS = 65_536
 
 
 def generate(prompt: str, model: str, max_tokens: int = DEFAULT_MAX_TOKENS,

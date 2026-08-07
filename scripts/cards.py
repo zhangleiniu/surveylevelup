@@ -1,9 +1,8 @@
 """Validate cards against the field block their prompt declares.
 
-This script does not write cards — an agent does, by running the prompts in
-inputs/prompts/. What it does is check that what got written matches the contract
-the prompt declared, and that nobody ran corpus-wide extraction before the gate
-was opened.
+`extract_cards.py` writes cards. This script checks that what landed matches the
+contract the prompt declared, and that nobody ran corpus-wide extraction before
+the gate was opened.
 
 Usage:
     python cards.py --check
@@ -12,11 +11,24 @@ Usage:
 """
 
 import argparse
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from common import (ABSENT, Progress, add_project_arg, card_problems, die,  # noqa: F401
                     find_project, load_prompts, parse_card, print_json)
+
+
+SUGGESTED_LABEL = re.compile(r"Suggested label:\s*(.+?)\s*$", re.I)
+
+
+def suggested_label(raw: str | None) -> str | None:
+    """Extract the schema candidate from a FREE TEXT escape-hatch value."""
+    value = (raw or "").strip()
+    if not value.upper().startswith("FREE TEXT"):
+        return None
+    match = SUGGESTED_LABEL.search(value)
+    return match.group(1).strip() if match else None
 
 
 def card_files(project: Path) -> dict:
@@ -63,19 +75,30 @@ def main():
             if args.type and card_type != args.type:
                 continue
             counts = {}
+            suggestions = {}
             for spec in fields:
                 if spec["kind"] not in ("enum", "int"):
                     continue
                 tally = Counter()
+                proposed = Counter()
                 for path in found.get(card_type, {}).values():
                     values = parse_card(path.read_text())
                     raw = {**values["front"], **values["body"]}.get(spec["name"])
                     tally[(raw or "").strip() or "(absent)"] += 1
+                    label = suggested_label(raw)
+                    if label:
+                        proposed[label] += 1
                 counts[spec["name"]] = dict(tally.most_common())
-            out[card_type] = {"cards": len(found.get(card_type, {})), "fields": counts}
+                if proposed:
+                    suggestions[spec["name"]] = dict(proposed.most_common())
+            out[card_type] = {"cards": len(found.get(card_type, {})),
+                              "fields": counts,
+                              "suggested_labels": suggestions}
         print_json({"aggregate": out,
                     "note": "a generated appendix column must be an enum; narrative "
-                            "fields are hand-written or not tabled at all"})
+                            "fields are hand-written or not tabled at all. Repeated "
+                            "suggested labels are evidence for schema review, not an "
+                            "automatic enum change"})
         return
 
     unknown_types = sorted(set(found) - set(prompts))

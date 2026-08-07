@@ -104,6 +104,7 @@ def main():
             "project": project_id,
             "location": location,
             "model": MODEL,
+            "max_output_tokens": extraction.get("max_output_tokens"),
             "gate": extraction.get("gate"),
             "prompt_sha256": extraction.get("prompt_sha256"),
             "usage": extraction.get("usage", {}),

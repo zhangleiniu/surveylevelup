@@ -1,10 +1,10 @@
 """Run the card prompts over papers and write cards, with provenance.
 
-The prompts in inputs/prompts/ are self-contained contracts: each declares its
-fields in a machine-readable block and explains its own field semantics. That
-makes a card a model-agnostic artifact, and it makes the bulk extraction pass
-runnable on a cheaper backend than the agent driving the survey. This script is
-what makes that possible without losing track of who produced what.
+The prompts in inputs/prompts/ declare their fields and project-specific
+semantics. This runner adds the shared output and evidence protocol, making each
+request a self-contained contract. That makes a card a model-agnostic artifact
+and lets the bulk pass run on a cheaper backend than the agent driving the
+survey without losing track of who produced what.
 
 Every card it writes records the prompt's digest and the exact backend and model.
 Cards produced by different prompts, backends or models are different artifact
@@ -42,6 +42,12 @@ CHARS_PER_TOKEN = 4
 
 # A whole paper, not a whole corpus. Truncation is reported per key.
 DEFAULT_MAX_CHARS = 600_000
+
+# Gemini reasoning tokens share this ceiling with the visible answer. This is a
+# ceiling, not a reservation: providers bill actual usage. Prefer enough room
+# for a complete card and reject a MAX_TOKENS response rather than saving a few
+# tokens and writing a stub.
+DEFAULT_MAX_OUTPUT_TOKENS = 65_536
 
 FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*$")
 LEADING_FRONT_MATTER = re.compile(r"\A\s*---\s*\n.*?\n---\s*\n", re.S)
@@ -110,8 +116,10 @@ line. No preamble, no closing remarks, no markdown fences, no front matter.
 - For a field flagged `evidence`, emit a sibling `<field>_evidence` line holding
   a **verbatim** quote from the text below and a page number, like:
   `purpose_evidence: "the exact words from the paper" (p. 7)`.
-  Quote what the paper actually says. Do not paraphrase, reconstruct, or
-  compose a quote.
+  Quote one contiguous span within one page. Do not join fragments with an
+  ellipsis, cross a visible page break or running header, paraphrase,
+  reconstruct, normalize, or compose a quote. If the best sentence crosses a
+  page boundary, use a shorter contiguous span wholly on one side.
 - `not reported` means the paper did not say. It is not the same as `none`,
   which means the paper says there is none. Prefer `not reported` when unsure.
 - If an `enum` value genuinely does not fit, do not force it into the nearest
@@ -374,7 +382,10 @@ def main():
                         help="check every quoted _evidence span against full text")
     parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS,
                         help=f"truncate paper text (default {DEFAULT_MAX_CHARS})")
-    parser.add_argument("--max-output-tokens", type=int, default=4096)
+    parser.add_argument("--max-output-tokens", type=int,
+                        default=DEFAULT_MAX_OUTPUT_TOKENS,
+                        help=f"output ceiling including reasoning tokens "
+                             f"(default {DEFAULT_MAX_OUTPUT_TOKENS})")
     parser.add_argument("--attempts", type=int, default=4,
                         help="tries per key before a hard failure is reported")
     args = parser.parse_args()
@@ -562,6 +573,7 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             "backend": args.backend,
             "generated": now_iso(),
             "fulltext_sha256": fulltext_digest,
+            "max_output_tokens": args.max_output_tokens,
         }
         metadata = dict(result.metadata)
         for source_name, front_name in (
@@ -569,6 +581,7 @@ def run_extract(project: Path, prompts: dict, args) -> None:
             ("location", "backend_location"),
             ("sdk_version", "sdk_version"),
             ("model_version", "model_version"),
+            ("finish_reason", "finish_reason"),
             ("input_tokens", "input_tokens"),
             ("output_tokens", "output_tokens"),
             ("thought_tokens", "thought_tokens"),
@@ -584,8 +597,6 @@ def run_extract(project: Path, prompts: dict, args) -> None:
         parsed = parse_card(card)
         problems = card_problems({**parsed["front"], **parsed["body"]}, fields)
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(card, encoding="utf-8")
         record = {"bibkey": bibkey, "path": str(target),
                   "input_tokens_estimate": estimate}
         usage = {name: metadata[name] for name in (
@@ -596,9 +607,13 @@ def run_extract(project: Path, prompts: dict, args) -> None:
         if truncated:
             record["truncated"] = True
         if problems:
-            invalid.append({**record, "problems": problems})
-        else:
-            written.append(record)
+            invalid.append({**record, "status": "schema_invalid",
+                            "problems": problems,
+                            "note": "response rejected before writing"})
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(card, encoding="utf-8")
+        written.append(record)
 
     payload = {
         "project": str(project),
@@ -607,6 +622,7 @@ def run_extract(project: Path, prompts: dict, args) -> None:
         "model": args.model,
         "prompt": prompt_file.name,
         "prompt_sha256": digest,
+        "max_output_tokens": args.max_output_tokens,
         "gate": "open" if gate_open else "closed",
         "requested": len(keys),
         "dry_run": bool(args.dry_run),
@@ -639,17 +655,17 @@ def run_extract(project: Path, prompts: dict, args) -> None:
     payload["failed"] = failed
     payload["next"] = ["cards.py --check", "extract_cards.py --verify-evidence"]
     if invalid:
-        payload["note"] = ("invalid cards were written and are reported here "
-                           "rather than silently retried; read them, then fix "
-                           "the prompt and re-run with --force")
+        payload["note"] = ("schema-invalid responses were rejected before writing; "
+                           "fix the prompt or producer, then re-run")
 
     progress.log("extract_cards", card_type=card_type, backend=args.backend,
                  model=args.model, prompt_sha256=digest,
+                 max_output_tokens=args.max_output_tokens,
                  written=len(written), invalid=len(invalid),
                  failed=len(failed), skipped=len(skipped), usage=usage_totals)
     progress.save()
     print_json(payload)
-    if failed:
+    if failed or invalid:
         raise SystemExit(1)
 
 

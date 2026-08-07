@@ -271,10 +271,18 @@ which cards are superseded, and cross again. What the gate prevents is doing tha
 ### Extraction and drafting
 
 Run `extract_cards.py --keys ...` on the trial papers, then `cards.py --check` and
-`extract_cards.py --verify-evidence`. The prompt is a self-contained contract, so
-the bulk pass may use a cheaper backend than the agent writing the survey without
-changing the card format. Every generated card records the prompt digest, backend
-and exact model; cards of one type must not mix those artifact cohorts.
+`extract_cards.py --verify-evidence`. The prompt supplies project-specific field
+semantics; the runner appends the shared output and evidence protocol, so the
+request sent to the model is self-contained. The bulk pass may therefore use a
+cheaper backend than the agent writing the survey without changing the card
+format. Every generated card records the prompt digest, backend and exact model;
+cards of one type must not mix those artifact cohorts.
+
+The default output ceiling is 65,536 tokens because reasoning tokens share that
+budget with the visible card; it is a ceiling, not prepaid usage. A Vertex
+`MAX_TOKENS` finish or any schema-invalid response is a failed paper and is never
+written into `inputs/cards/`. Raise the ceiling explicitly if a model supports
+more; never accept a truncated card as evidence.
 
 For a corpus-wide `--all` run, write `state/card_assignments.json` as
 `{"bibkey": ["method", "benchmark"]}`. A paper may have two cards; an empty list
@@ -284,7 +292,12 @@ judgments, so `--all` refuses to guess from the corpus folders.
 Evidence verification reports an exact or punctuation-only match as `verified`.
 `near_match` is deliberately unresolved: PDF extraction damage can cause it, and
 so can a reconstructed quote. It is always flagged for a person to check against
-the PDF. Record each extraction cohort in `PROVENANCE.md`.
+the PDF. The shared protocol requires every evidence quote to be one contiguous
+span within one page; it forbids splicing fragments across page furniture.
+`cards.py --aggregate` separately tallies repeated `Suggested label:` values from
+the FREE TEXT escape hatch. Treat those counts as schema-review evidence, not an
+automatic threshold for changing an enum. Record each extraction cohort in
+`PROVENANCE.md`.
 
 **Read the prompts before reading the cards.** They carry the field semantics,
 the enum vocabularies, and the blind spots — above all that `not reported` means

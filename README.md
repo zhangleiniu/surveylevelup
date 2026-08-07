@@ -130,13 +130,18 @@ root with a warning label, because that is the same fact living in two places.
 | `build_bib.py` | Corpus sidecar → `references.bib`, plus a gap report that only flags what actually blocks |
 | `extract_fulltext.py` | PDFs → `inputs/fulltext/<bibkey>.md` via PyMuPDF. Ungated |
 | `gate.py` | Report gate readiness; `--open --signed-by` records the crossing |
-| `extract_cards.py` | Run card prompts through `vertex`, `anthropic` or the offline `fake` backend; enforce the gate before writing; stamp and verify provenance |
-| `cards.py` | Validate cards against the field block their prompt declares; `--aggregate` for distributions |
+| `extract_cards.py` | Run card prompts through `vertex`, `anthropic` or the offline `fake` backend; enforce the gate; reject truncated/invalid responses before writing; stamp and verify provenance |
+| `cards.py` | Validate cards against the field block their prompt declares; `--aggregate` includes distributions and repeated FREE TEXT suggestions |
 
 `extract_cards.py` writes cards and checks the same declared contract as
 `cards.py`. A trial run names keys explicitly. A corpus-wide `--all` run requires
 `state/card_assignments.json`, mapping every bib key to a list of applicable card
 types; it never infers paper type from the corpus folders.
+
+The default output ceiling is 65,536 tokens so thinking cannot consume a small
+budget and leave a stub card. Providers bill actual usage, not the ceiling.
+Vertex `MAX_TOKENS` responses and schema-invalid responses are reported as
+failures and never written into the card evidence directory.
 
 ```bash
 python3 ~/.claude/skills/surveylevelup/scripts/extract_cards.py \

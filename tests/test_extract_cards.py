@@ -16,11 +16,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import extract_cards  # noqa: E402
+from backends import BackendError  # noqa: E402
+from backends import vertex  # noqa: E402
 from common import parse_card  # noqa: E402
 
 PROMPT = """# Method card
@@ -65,6 +68,13 @@ def check(project):
     return json.loads(proc.stdout)
 
 
+def aggregate(project):
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPTS / "cards.py"), "--project", str(project),
+         "--aggregate"], capture_output=True, text=True)
+    return json.loads(proc.stdout)
+
+
 class ProjectCase(unittest.TestCase):
     """A throwaway project with one prompt, two papers, and an open gate."""
 
@@ -98,6 +108,13 @@ class ProjectCase(unittest.TestCase):
 
 class TestProvenance(ProjectCase):
 
+    def test_runner_adds_the_shared_evidence_contract(self):
+        request = extract_cards.build_request(PROMPT, PAPER, "goodpaper2024x")
+        self.assertIn("one contiguous span within one page", request)
+        self.assertIn("Do not join fragments with an", request)
+        self.assertIn("`not reported` means the paper did not say", request)
+        self.assertIn("Suggested label: <candidate>", request)
+
     def test_front_matter_records_model_and_prompt_digest(self):
         code, out = run(self.project, "--type", "method",
                         "--keys", "goodpaper2024x",
@@ -112,6 +129,7 @@ class TestProvenance(ProjectCase):
         self.assertEqual(front["prompt"], "method_card.md")
         self.assertEqual(len(front["prompt_sha256"]), 12)
         self.assertEqual(len(front["fulltext_sha256"]), 12)
+        self.assertEqual(front["max_output_tokens"], "65536")
         self.assertIn("generated", front)
 
     def test_written_card_passes_cards_py_check(self):
@@ -144,7 +162,7 @@ class TestProvenance(ProjectCase):
 
 
 class TestPreValidation(ProjectCase):
-    """A card that fails is still written, and reported as invalid."""
+    """A schema-invalid response is reported but never becomes evidence."""
 
     def extract(self, mode, key="goodpaper2024x"):
         return run(self.project, "--type", "method", "--keys", key,
@@ -153,15 +171,16 @@ class TestPreValidation(ProjectCase):
 
     def assertFlags(self, mode, needle):
         code, out = self.extract(mode)
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)
         self.assertEqual(out["written"], [], out)
         self.assertEqual(len(out["invalid"]), 1, out)
         problems = json.dumps(out["invalid"][0]["problems"])
         self.assertIn(needle, problems)
-        # written anyway, and cards.py agrees it is broken
-        self.assertTrue(self.card("goodpaper2024x").exists())
+        self.assertEqual(out["invalid"][0]["status"], "schema_invalid")
+        self.assertFalse(self.card("goodpaper2024x").exists())
         report = check(self.project)
         self.assertEqual(report["cards_clean"], 0, report)
+        self.assertEqual(report["cards_checked"], 0, report)
 
     def test_missing_required_field(self):
         self.assertFlags("missing_required", "required field absent")
@@ -200,14 +219,27 @@ class TestRefusals(ProjectCase):
         self.assertEqual(out["skipped"][0]["status"], "exists")
         self.assertEqual(self.card("goodpaper2024x").read_text(), first)
 
-    def test_force_overwrites(self):
+    def test_force_keeps_existing_card_when_rerun_is_invalid(self):
+        run(self.project, "--type", "method", "--keys", "goodpaper2024x",
+            "--backend", "fake", "--model", "fake-model-1")
+        before = self.card("goodpaper2024x").read_text()
+        code, out = run(self.project, "--type", "method", "--keys", "goodpaper2024x",
+                        "--backend", "fake", "--model", "fake-model-1", "--force",
+                        env={"SURVEYLEVELUP_FAKE_MODE": "bad_enum"})
+        self.assertEqual(code, 1, out)
+        self.assertEqual(len(out["invalid"]), 1, out)
+        self.assertEqual(self.card("goodpaper2024x").read_text(), before)
+
+    def test_force_replaces_existing_card_when_rerun_is_valid(self):
         run(self.project, "--type", "method", "--keys", "goodpaper2024x",
             "--backend", "fake", "--model", "fake-model-1")
         code, out = run(self.project, "--type", "method", "--keys", "goodpaper2024x",
                         "--backend", "fake", "--model", "fake-model-1", "--force",
-                        env={"SURVEYLEVELUP_FAKE_MODE": "bad_enum"})
+                        env={"SURVEYLEVELUP_FAKE_MODE": "free_text"})
         self.assertEqual(code, 0, out)
-        self.assertEqual(len(out["invalid"]), 1, out)
+        self.assertEqual(len(out["written"]), 1, out)
+        self.assertIn("Suggested label: relaxation",
+                      self.card("goodpaper2024x").read_text())
 
     def test_model_mixing_refused(self):
         run(self.project, "--type", "method", "--keys", "goodpaper2024x",
@@ -352,6 +384,20 @@ class TestCardAssignments(ProjectCase):
         self.assertEqual(len(out["problems"]), 2, out)
 
 
+class TestAggregate(ProjectCase):
+
+    def test_repeated_suggested_labels_are_counted_together(self):
+        code, out = run(
+            self.project, "--type", "method",
+            "--keys", "goodpaper2024x,otherpaper2024y",
+            "--backend", "fake", "--model", "fake-model-1",
+            env={"SURVEYLEVELUP_FAKE_MODE": "free_text"})
+        self.assertEqual(code, 0, out)
+        report = aggregate(self.project)
+        labels = report["aggregate"]["method"]["suggested_labels"]["approach"]
+        self.assertEqual(labels, {"relaxation": 2})
+
+
 class TestVerifyEvidence(ProjectCase):
 
     def write_card(self, bibkey, evidence):
@@ -488,6 +534,39 @@ class TestBackendRetry(unittest.TestCase):
         import backends
         with self.assertRaises(KeyError):
             backends.load("telepathy")
+
+
+class TestVertexFinishReason(unittest.TestCase):
+
+    def response(self, reason):
+        return SimpleNamespace(
+            candidates=[SimpleNamespace(finish_reason=reason)])
+
+    def test_sdk_enum_and_string_forms_are_normalised(self):
+        enum_like = SimpleNamespace(value="MAX_TOKENS", name="MAX_TOKENS")
+        self.assertEqual(vertex._finish_reason(self.response(enum_like)),
+                         "MAX_TOKENS")
+        self.assertEqual(vertex._finish_reason(self.response("STOP")), "STOP")
+
+    def test_missing_candidate_has_no_finish_reason(self):
+        self.assertIsNone(vertex._finish_reason(SimpleNamespace(candidates=[])))
+
+    def test_generous_vertex_default(self):
+        self.assertEqual(vertex.DEFAULT_MAX_TOKENS, 65_536)
+        self.assertEqual(extract_cards.DEFAULT_MAX_OUTPUT_TOKENS, 65_536)
+
+    def test_max_tokens_is_a_hard_failure_with_usage(self):
+        with self.assertRaisesRegex(BackendError, "MAX_TOKENS.*thought_tokens=3929"):
+            vertex._check_finish_reason(
+                "MAX_TOKENS", 4096,
+                {"thought_tokens": 3929, "output_tokens": 163})
+
+    def test_non_stop_finish_reason_is_a_hard_failure(self):
+        with self.assertRaisesRegex(BackendError, "finish_reason=SAFETY"):
+            vertex._check_finish_reason("SAFETY", 65_536, {})
+
+    def test_stop_is_accepted(self):
+        vertex._check_finish_reason("STOP", 65_536, {})
 
 
 def backends_generate(slept):

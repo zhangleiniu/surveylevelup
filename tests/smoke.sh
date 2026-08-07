@@ -188,15 +188,23 @@ echo "$OUT" | grep -q '"refused": "artifact_cohort_mixing"' \
   || fail "model mixing not refused"
 ok "runner refuses to mix artifact cohorts within one card type"
 
-SURVEYLEVELUP_FAKE_MODE=bad_enum python3 "$S/extract_cards.py" --project "$WORK" \
-  --type method --keys trial2024a --backend fake --model smoke-model-1 --force \
-  | grep -q 'outside the declared enum' || fail "pre-validation missed a bad enum"
-ok "pre-validation reports an invalid card instead of retrying it"
+OUT="$(SURVEYLEVELUP_FAKE_MODE=bad_enum python3 "$S/extract_cards.py" \
+  --project "$WORK" --type method --keys trial2024a \
+  --backend fake --model smoke-model-1 --force 2>/dev/null || true)"
+echo "$OUT" | grep -q 'outside the declared enum' \
+  || fail "pre-validation missed a bad enum"
+grep -q '^approach: graph$' "$WORK/inputs/cards/method/trial2024a.md" \
+  || fail "an invalid rerun replaced a valid card"
+ok "pre-validation rejects an invalid response before writing"
 
 SURVEYLEVELUP_FAKE_MODE=free_text python3 "$S/extract_cards.py" --project "$WORK" \
-  --type method --keys trial2024a --backend fake --model smoke-model-1 --force \
+  --type method --keys trial2024a,trial2024b --backend fake --model smoke-model-1 --force \
   | grep -q '"invalid": \[\]' || fail "the FREE TEXT escape hatch was rejected"
 ok "pre-validation accepts the FREE TEXT escape hatch"
+
+python3 "$S/cards.py" --project "$WORK" --aggregate \
+  | grep -q '"relaxation": 2' || fail "repeated suggested labels were not aggregated"
+ok "aggregate surfaces repeated FREE TEXT suggestions"
 
 OUT="$(python3 "$S/extract_cards.py" --project "$WORK" --verify-evidence --type method)"
 echo "$OUT" | grep -q '"verified": 2' || fail "a real quote did not verify"
@@ -206,7 +214,7 @@ python3 - "$WORK" <<'PY'
 import sys, pathlib
 card = pathlib.Path(sys.argv[1]) / "inputs/cards/method/trial2024b.md"
 text = card.read_text()
-card.write_text(text.replace('"we route messages along the instance graph"',
+card.write_text(text.replace('"we route messages"',
                              '"we solve the whole thing with one transformer"'))
 PY
 python3 "$S/extract_cards.py" --project "$WORK" --verify-evidence --type method \
