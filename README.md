@@ -1,4 +1,5 @@
 <div id="header" align="center">
+  <img src="surveylevelup.svg" alt="Survey Level Up logo" width="180">
   <h1>Survey Level Up</h1>
 </div>
 
